@@ -720,7 +720,14 @@ else
   if [[ ! -f .env ]]; then
     IS_FRESH_INSTALL=true
   fi
-  stamp_telemetry install-method release --source install.sh
+  # Stamp install-method based on ref kind:
+  # - release/version → release (tagged version installs)
+  # - branch/branch-fallback → source (dev/branch installs)
+  if [[ "$TARGET_REF_KIND" == "release" || "$TARGET_REF_KIND" == "version" ]]; then
+    stamp_telemetry install-method release --source install.sh
+  else
+    stamp_telemetry install-method source --source install.sh
+  fi
   if [[ "$IS_FRESH_INSTALL" == "true" ]]; then
     stamp_telemetry bootstrap fresh_install --if-missing --source install.sh
   fi

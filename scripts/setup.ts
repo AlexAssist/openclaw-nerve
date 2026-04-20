@@ -116,8 +116,10 @@ function stampTelemetry(
 }
 
 function finalizeSetupTelemetry(isFreshInstall: boolean): void {
-  stampTelemetry('install-method', 'source', { ifMissing: true, source: 'setup' });
+  // Only stamp install-method=source on a fresh source install.
+  // Legacy installs (missing provenance) must remain unknown.
   if (isFreshInstall) {
+    stampTelemetry('install-method', 'source', { ifMissing: true, source: 'setup' });
     stampTelemetry('bootstrap', 'fresh_install', { ifMissing: true, source: 'setup' });
   }
 }

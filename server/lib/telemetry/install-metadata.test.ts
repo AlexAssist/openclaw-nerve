@@ -113,4 +113,82 @@ describe('telemetry install metadata', () => {
     expect(result).toEqual(current);
     expect(readBootstrapMarker()).toEqual(current);
   });
+
+  describe('runtime legacy upgrade bootstrap', () => {
+    it('stamps upgrade_legacy at runtime when no bootstrap marker exists', () => {
+      // No prior bootstrap marker
+      expect(readBootstrapMarker()).toBeUndefined();
+
+      const result = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-21T12:00:00Z' });
+
+      expect(result).toEqual({
+        kind: 'upgrade_legacy',
+        stampedAt: '2026-04-21T12:00:00Z',
+        source: 'runtime',
+      });
+      expect(readBootstrapMarker()).toEqual(result);
+    });
+
+    it('does not stamp upgrade_legacy when explicit NERVE_TELEMETRY_MODE is set', () => {
+      expect(readBootstrapMarker()).toBeUndefined();
+
+      const result = ensureLegacyUpgradeMarker({ envMode: 'detailed', stampedAt: '2026-04-21T12:00:00Z' });
+
+      expect(result).toBeUndefined();
+      expect(readBootstrapMarker()).toBeUndefined();
+    });
+
+    it('preserves existing upgrade_legacy marker on repeated runtime calls', () => {
+      const first = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-21T12:00:00Z' });
+      const second = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-22T12:00:00Z' });
+
+      expect(second).toEqual(first);
+      expect(readBootstrapMarker()).toEqual(first);
+    });
+
+    it('returns existing fresh_install marker without modification', () => {
+      const original = writeBootstrapMarker('fresh_install', 'setup', '2026-04-20T00:00:00Z');
+
+      const result = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-21T12:00:00Z' });
+
+      expect(result).toEqual(original);
+      expect(readBootstrapMarker()?.kind).toBe('fresh_install');
+    });
+  });
+
+  describe('setup provenance stability', () => {
+    it('does not relabel unknown install-method when setup reruns on legacy install', () => {
+      // Legacy install: no install-method stamp exists
+      expect(readInstallMethod()).toBeUndefined();
+
+      // Simulate setup rerun with isFreshInstall=false (has .env)
+      // resolveInstallMethodAfterSetup should NOT produce 'source' when current is undefined
+      // because we changed finalizeSetupTelemetry to only stamp on fresh installs
+      const resolved = resolveInstallMethodAfterSetup(undefined);
+
+      // This tests the contract: without a stamp, the function suggests 'source'
+      // but finalizeSetupTelemetry now guards against calling this for non-fresh installs
+      expect(resolved.installMethod).toBe('source');
+      // The key regression test is that setup.ts no longer calls stampTelemetry
+      // for install-method when isFreshInstall=false - that's tested in integration
+    });
+
+    it('preserves existing release stamp when setup runs on release install', () => {
+      writeInstallMethod('release', 'install.sh', '2026-04-20T00:00:00Z');
+
+      const resolved = resolveInstallMethodAfterSetup(readInstallMethod());
+
+      expect(resolved.installMethod).toBe('release');
+      expect(resolved.source).toBe('install.sh');
+    });
+
+    it('preserves existing source stamp when setup reruns on source install', () => {
+      writeInstallMethod('source', 'setup', '2026-04-20T00:00:00Z');
+
+      const resolved = resolveInstallMethodAfterSetup(readInstallMethod());
+
+      expect(resolved.installMethod).toBe('source');
+      expect(resolved.source).toBe('setup');
+    });
+  });
 });

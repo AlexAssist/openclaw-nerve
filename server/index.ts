@@ -17,6 +17,7 @@ import { releaseWhisperContext } from './services/whisper-local.js';
 import { config, validateConfig, printStartupBanner, probeGateway } from './lib/config.js';
 import { setupWebSocketProxy, closeAllWebSockets } from './lib/ws-proxy.js';
 import { startFileWatcher, stopFileWatcher } from './lib/file-watcher.js';
+import { ensureLegacyUpgradeMarker } from './lib/telemetry/install-metadata.js';
 
 // ── Startup banner + validation ──────────────────────────────────────
 
@@ -26,6 +27,11 @@ const pkgVersion: string = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 
 printStartupBanner(pkgVersion);
 validateConfig();
+
+// ── Telemetry bootstrap marker for legacy installs ───────────────────
+// If there's no trusted fresh-install marker and no explicit NERVE_TELEMETRY_MODE,
+// mark this as a legacy upgrade so telemetry stays off by default.
+ensureLegacyUpgradeMarker({ envMode: process.env.NERVE_TELEMETRY_MODE });
 
 // ── Start file watchers ──────────────────────────────────────────────
 
