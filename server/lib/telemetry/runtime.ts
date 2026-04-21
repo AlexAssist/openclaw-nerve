@@ -345,7 +345,7 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         identity: { instanceId },
         appVersion: options.appVersion,
         installMethod,
-        surface: normalized.surface || 'chat',
+        surface: normalized.surface || 'sessions',
         sentAt: normalized.occurredAt,
       }));
     },
