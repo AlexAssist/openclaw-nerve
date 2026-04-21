@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import {
+  buildKanbanTaskCreatedEvent,
   buildMessageSubmittedEvent,
   buildSessionCreatedEvent,
   buildToolCallCompletedEvent,
@@ -63,6 +64,12 @@ export interface RecordToolTelemetryInput extends RecordToolCompletedInput {
   surface?: DetailedEventSurface;
 }
 
+export interface RecordKanbanTaskCreatedInput {
+  surface?: DetailedEventSurface;
+  success: boolean;
+  occurredAt?: Date | string | number;
+}
+
 export interface TelemetryServerInfoDisclosure {
   telemetryMode: TelemetryMode;
   telemetryEnabled: boolean;
@@ -78,6 +85,7 @@ export interface TelemetryRuntime {
   recordSessionCreated(input?: RecordSessionCreatedInput | Date | string | number): Promise<void>;
   recordMessageSubmitted(input?: RecordMessageSubmittedInput | Date | string | number): Promise<void>;
   recordToolCompleted(input: RecordToolTelemetryInput): Promise<void>;
+  recordKanbanTaskCreated(input: RecordKanbanTaskCreatedInput): Promise<void>;
   markFeatureUsed(feature: TelemetryFeatureName, at?: Date | string | number): Promise<void>;
   markSessionSeen(sessionKey: string): Promise<MarkSessionSeenResult>;
   reportError(input: ReportTelemetryErrorInput): Promise<void>;
@@ -384,6 +392,21 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         startedAt: input.startedAt,
         finishedAt: input.finishedAt,
         sentAt: input.occurredAt ?? input.finishedAt,
+      }));
+    },
+
+    async recordKanbanTaskCreated(input) {
+      if (!detailedTelemetryEnabled()) {
+        return;
+      }
+
+      sendDetailedEvent(buildKanbanTaskCreatedEvent({
+        identity: { instanceId },
+        appVersion: options.appVersion,
+        installMethod,
+        surface: input.surface || 'kanban',
+        success: input.success,
+        sentAt: input.occurredAt,
       }));
     },
 

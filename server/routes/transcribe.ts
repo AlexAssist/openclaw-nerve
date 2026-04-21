@@ -11,6 +11,7 @@ import { config, updateConfig } from '../lib/config.js';
 import { SUPPORTED_LANGUAGES } from '../lib/constants.js';
 import { writeEnvKey } from '../lib/env-file.js';
 import { isLanguageSupported } from '../lib/language.js';
+import { getTelemetryRuntime } from '../lib/telemetry/runtime.js';
 import { transcribe as transcribeOpenAI } from '../services/openai-whisper.js';
 import { transcribeLocal, isModelAvailable, getActiveModel, setWhisperModel, getDownloadProgress, getSystemInfo } from '../services/whisper-local.js';
 import { rateLimitTranscribe, rateLimitGeneral } from '../middleware/rate-limit.js';
@@ -32,6 +33,16 @@ const ALLOWED_AUDIO_TYPES = new Set([
 ]);
 
 const app = new Hono();
+
+function runTelemetryInBackground(work: Promise<unknown>): void {
+  void work.catch(() => {});
+}
+
+function markSettingsFeatureUsed(): void {
+  const telemetry = getTelemetryRuntime();
+  if (!telemetry) return;
+  runTelemetryInBackground(telemetry.markFeatureUsed('settings'));
+}
 
 app.post('/api/transcribe', rateLimitTranscribe, async (c) => {
   try {
@@ -135,6 +146,10 @@ app.put('/api/transcribe/config', async (c) => {
       updateConfig('language', lang);
       await writeEnvKey('NERVE_LANGUAGE', lang);
       messages.push(`Language set to ${lang}`);
+    }
+
+    if (messages.length > 0) {
+      markSettingsFeatureUsed();
     }
 
     return c.json({

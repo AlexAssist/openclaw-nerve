@@ -22,7 +22,7 @@ export type DetailedEventSurface = (typeof DETAILED_EVENT_SURFACES)[number];
 export type DetailedFeatureArea = DetailedEventSurface;
 export type DetailedToolFamily = (typeof DETAILED_TOOL_FAMILIES)[number];
 export type ToolDurationBucket = (typeof TOOL_DURATION_BUCKETS)[number];
-export type DetailedEventName = 'session_created' | 'message_submitted' | 'tool_call_completed';
+export type DetailedEventName = 'session_created' | 'message_submitted' | 'tool_call_completed' | 'kanban_task_created';
 
 interface DetailedEventBaseParams {
   identity: { instanceId: string };
@@ -70,6 +70,20 @@ export interface ToolCallCompletedEventPayload {
     tool_name: DetailedToolFamily;
     success: boolean;
     duration_bucket: ToolDurationBucket;
+  };
+}
+
+export interface KanbanTaskCreatedEventPayload {
+  schema_version: 1;
+  event: 'kanban_task_created';
+  instance_id: string;
+  app_version: string;
+  install_method: InstallMethod;
+  sent_at: string;
+  properties: {
+    surface: DetailedEventSurface;
+    feature_area: DetailedFeatureArea;
+    success: boolean;
   };
 }
 
@@ -185,5 +199,17 @@ export function buildToolCallCompletedEvent(
     tool_name: coerceToolFamily(params.toolName),
     success: !!params.success,
     duration_bucket: bucketDurationMs(params.finishedAt - params.startedAt),
+  });
+}
+
+export function buildKanbanTaskCreatedEvent(
+  params: DetailedEventBaseParams & {
+    surface: DetailedEventSurface | string;
+    success: boolean;
+  },
+): KanbanTaskCreatedEventPayload {
+  return buildDetailedEvent(params, 'kanban_task_created', {
+    ...buildSurfaceProperties(params.surface, 'kanban'),
+    success: !!params.success,
   });
 }
