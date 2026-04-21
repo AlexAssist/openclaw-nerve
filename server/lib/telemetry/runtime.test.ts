@@ -213,6 +213,67 @@ describe('telemetry runtime', () => {
     await runtime.stop();
   });
 
+  it('relays branch_switched detailed events with the workspace payload shape', async () => {
+    const { store } = createMemoryStore();
+    const transportPostJson = vi.fn().mockResolvedValue(true);
+    const detailedPostJson = vi.fn().mockResolvedValue(true);
+    const runtime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: 'detailed',
+      store,
+      transport: { postJson: transportPostJson },
+      detailedTransport: { postJson: detailedPostJson },
+      metadata: createMetadata('detailed', { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T00:05:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      phase2BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await runtime.start();
+    await runtime.recordClientDetailedEvent({ event: 'branch_switched', properties: { success: true } });
+    await flushAsyncWork();
+
+    expect(detailedPostJson).toHaveBeenCalledTimes(1);
+    expect(detailedPostJson).toHaveBeenCalledWith('/v1/events', expect.objectContaining({
+      event: 'branch_switched',
+      sent_at: '2026-04-21T00:05:00.000Z',
+      properties: {
+        surface: 'workspace',
+        feature_area: 'workspace',
+        success: true,
+      },
+    }));
+
+    await runtime.stop();
+  });
+
+  it.each(['off', 'minimal'] as const)('does not emit branch_switched detailed events in %s mode', async (mode) => {
+    const { store } = createMemoryStore();
+    const transportPostJson = vi.fn().mockResolvedValue(true);
+    const detailedPostJson = vi.fn().mockResolvedValue(true);
+    const runtime = createTelemetryRuntime({
+      appVersion: '1.5.2',
+      envMode: mode,
+      store,
+      transport: { postJson: transportPostJson },
+      detailedTransport: { postJson: detailedPostJson },
+      metadata: createMetadata(mode, { kind: 'fresh_install', stampedAt: '2026-04-20T00:00:00.000Z', source: 'setup' }),
+      now: () => new Date('2026-04-21T00:05:00.000Z'),
+      phase1BaseUrl: 'https://telemetry.example.com',
+      phase2BaseUrl: 'https://telemetry.example.com',
+      publicDocUrl: 'https://example.com/telemetry',
+    });
+
+    await runtime.start();
+    await runtime.recordClientDetailedEvent({ event: 'branch_switched', properties: { success: true } });
+    await flushAsyncWork();
+
+    expect(detailedPostJson).not.toHaveBeenCalled();
+
+    await runtime.stop();
+  });
+
   it('sends a version_change heartbeat when the app version changes', async () => {
     const { store, snapshot } = createMemoryStore();
     snapshot.lastHeartbeatSentAtByReason.first_seen = '2026-04-20T00:00:00.000Z';
