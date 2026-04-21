@@ -17,7 +17,7 @@ import { releaseWhisperContext } from './services/whisper-local.js';
 import { config, validateConfig, printStartupBanner, probeGateway } from './lib/config.js';
 import { setupWebSocketProxy, closeAllWebSockets } from './lib/ws-proxy.js';
 import { startFileWatcher, stopFileWatcher } from './lib/file-watcher.js';
-import { ensureLegacyUpgradeMarker } from './lib/telemetry/install-metadata.js';
+import { createTelemetryRuntime, setTelemetryRuntime } from './lib/telemetry/runtime.js';
 
 // ── Startup banner + validation ──────────────────────────────────────
 
@@ -28,14 +28,11 @@ const pkgVersion: string = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version
 printStartupBanner(pkgVersion);
 validateConfig();
 
-// ── Telemetry bootstrap marker for legacy installs ───────────────────
-// If there's no trusted fresh-install marker and no explicit NERVE_TELEMETRY_MODE,
-// mark this as a legacy upgrade so telemetry stays off by default.
-try {
-  ensureLegacyUpgradeMarker({ envMode: process.env.NERVE_TELEMETRY_MODE });
-} catch (err) {
-  console.warn('[telemetry] Failed to update bootstrap metadata:', (err as Error).message);
-}
+const telemetryRuntime = createTelemetryRuntime({ appVersion: pkgVersion });
+setTelemetryRuntime(telemetryRuntime);
+void telemetryRuntime.start().catch((err) => {
+  console.warn('[telemetry] Failed to start telemetry runtime:', (err as Error).message);
+});
 
 // ── Start file watchers ──────────────────────────────────────────────
 
@@ -169,6 +166,8 @@ if (fs.existsSync(config.certPath) && fs.existsSync(config.keyPath)) {
 function shutdown(signal: string) {
   console.log(`\n[openclaw-ui] ${signal} received, shutting down...`);
 
+  setTelemetryRuntime(null);
+  void telemetryRuntime.stop();
   stopFileWatcher();
   closeAllWebSockets();
   releaseWhisperContext().catch(() => {});
