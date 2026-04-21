@@ -47,6 +47,7 @@ interface PendingRequest {
   method: string;
   sessionKey?: string;
   sentAt: number;
+  markSessionsFeatureUsedOnSuccess?: boolean;
 }
 
 interface PendingTool {
@@ -320,8 +321,13 @@ function createGatewayRelay(
       const request = pendingRequests.get(message.id);
       if (request) {
         pendingRequests.delete(message.id);
-        if (message.ok === true && request.method === 'chat.send') {
-          recordMessageSubmitted(request);
+        if (message.ok === true) {
+          if (request.method === 'chat.send') {
+            recordMessageSubmitted(request);
+          }
+          if (request.markSessionsFeatureUsedOnSuccess) {
+            markSessionsFeatureUsed();
+          }
         }
       }
       return;
@@ -362,11 +368,15 @@ function createGatewayRelay(
       return;
     }
 
-    if (message.method === 'chat.send') {
+    const markSessionsFeatureUsedOnSuccess = isControlUiClient
+      && (requestChangesSessionLabel(message.method, message.params) || message.method === 'sessions.delete');
+
+    if (message.method === 'chat.send' || markSessionsFeatureUsedOnSuccess) {
       pendingRequests.set(message.id, {
         method: message.method,
         sessionKey: extractSessionKey(message.params),
         sentAt: Date.now(),
+        markSessionsFeatureUsedOnSuccess,
       });
     }
   }

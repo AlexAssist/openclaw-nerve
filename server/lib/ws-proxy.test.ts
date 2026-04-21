@@ -147,14 +147,18 @@ function waitForJsonMessage<T = Record<string, unknown>>(
   });
 }
 
-async function establishGatewaySession(ws: WebSocket, connectId = 'connect-1'): Promise<void> {
+async function establishGatewaySession(
+  ws: WebSocket,
+  connectId = 'connect-1',
+  clientId = 'nerve-ui',
+): Promise<void> {
   await waitForJsonMessage(ws, (message) => message.type === 'event' && message.event === 'connect.challenge');
 
   ws.send(JSON.stringify({
     type: 'req',
     method: 'connect',
     id: connectId,
-    params: { auth: { token: 'test-token' }, client: { id: 'nerve-ui', mode: 'webchat' } },
+    params: { auth: { token: 'test-token' }, client: { id: clientId, mode: 'webchat' } },
   }));
 
   await waitForJsonMessage(ws, (message) => (
@@ -965,6 +969,76 @@ describe('ws-proxy', () => {
           key: 'agent:main:main',
           deleteTranscript: true,
         });
+        expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('sessions');
+      });
+
+      ws.close();
+    });
+
+    it('marks the sessions feature used when a control-ui label change succeeds through the proxied gateway', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws, 'connect-control-patch-1', 'openclaw-control-ui');
+      mockGw.clearReceived();
+
+      ws.send(JSON.stringify({
+        type: 'req',
+        method: 'sessions.patch',
+        id: 'patch-control-label-1',
+        params: {
+          key: 'agent:main:main',
+          label: 'Renamed from control UI',
+        },
+      }));
+
+      await mockGw.expectMessages(1);
+      mockGw.broadcast(JSON.stringify({
+        type: 'res',
+        id: 'patch-control-label-1',
+        ok: true,
+        payload: { ok: true },
+      }));
+      await waitForJsonMessage(ws, (message) => message.type === 'res' && message.id === 'patch-control-label-1');
+
+      await vi.waitFor(() => {
+        expect(mockedGatewayRpcCall).not.toHaveBeenCalled();
+        expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('sessions');
+      });
+
+      ws.close();
+    });
+
+    it('marks the sessions feature used when a control-ui delete succeeds through the proxied gateway', async () => {
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
+      );
+
+      await establishGatewaySession(ws, 'connect-control-delete-1', 'openclaw-control-ui');
+      mockGw.clearReceived();
+
+      ws.send(JSON.stringify({
+        type: 'req',
+        method: 'sessions.delete',
+        id: 'delete-control-session-1',
+        params: {
+          key: 'agent:main:main',
+          deleteTranscript: true,
+        },
+      }));
+
+      await mockGw.expectMessages(1);
+      mockGw.broadcast(JSON.stringify({
+        type: 'res',
+        id: 'delete-control-session-1',
+        ok: true,
+        payload: { ok: true },
+      }));
+      await waitForJsonMessage(ws, (message) => message.type === 'res' && message.id === 'delete-control-session-1');
+
+      await vi.waitFor(() => {
+        expect(mockedGatewayRpcCall).not.toHaveBeenCalled();
         expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('sessions');
       });
 
