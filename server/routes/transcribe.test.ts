@@ -121,7 +121,7 @@ describe('transcribe routes', () => {
       expect(json.provider).toBe('openai');
     });
 
-    it('marks settings used when transcription config updates succeed', async () => {
+    it('marks settings used when language updates succeed', async () => {
       mockDeps();
       const app = await buildApp();
       const res = await app.request('/api/transcribe/config', {
@@ -131,6 +131,36 @@ describe('transcribe routes', () => {
       });
 
       expect(res.status).toBe(200);
+      expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
+      expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('settings');
+    });
+
+    it('marks settings used when provider updates succeed', async () => {
+      mockDeps();
+      const app = await buildApp();
+      const res = await app.request('/api/transcribe/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'openai' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
+      expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('settings');
+    });
+
+    it('marks settings used when model updates succeed', async () => {
+      mockDeps();
+      const app = await buildApp();
+      const res = await app.request('/api/transcribe/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'small' }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.message).toBe('Model set to small');
       expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledTimes(1);
       expect(telemetryRuntimeMock.markFeatureUsed).toHaveBeenCalledWith('settings');
     });
@@ -172,7 +202,7 @@ describe('transcribe routes', () => {
       expect(json.language).toBe('de');
     });
 
-    it('rejects bad model', async () => {
+    it('rejects bad model without emitting settings telemetry', async () => {
       mockDeps();
       const app = await buildApp();
       const res = await app.request('/api/transcribe/config', {
@@ -180,7 +210,9 @@ describe('transcribe routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'bad-model' }),
       });
+
       expect(res.status).toBe(400);
+      expect(telemetryRuntimeMock.markFeatureUsed).not.toHaveBeenCalled();
     });
 
     it('returns 400 for invalid JSON', async () => {
