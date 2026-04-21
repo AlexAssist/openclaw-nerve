@@ -152,6 +152,35 @@ This allows the browser UI to connect without having to manually enter or store 
 AGENT_NAME=Friday
 ```
 
+### Telemetry
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NERVE_TELEMETRY_MODE` | *(effective default depends on install state)* | Telemetry mode: `off`, `minimal`, or `detailed` |
+| `NERVE_TELEMETRY_DIR` | `~/.nerve/telemetry` | Local directory for telemetry metadata and rolling aggregate state |
+
+```bash
+# Disable telemetry entirely
+NERVE_TELEMETRY_MODE=off
+
+# Or opt into minimal / detailed telemetry explicitly
+NERVE_TELEMETRY_MODE=minimal
+NERVE_TELEMETRY_MODE=detailed
+
+# Optional custom local state dir
+NERVE_TELEMETRY_DIR=~/.nerve/telemetry
+```
+
+Mode resolution is:
+
+1. explicit `NERVE_TELEMETRY_MODE` wins
+2. otherwise a trusted fresh install resolves to `minimal`
+3. otherwise Nerve resolves to `off`
+
+Fresh installs created by `install.sh` or `npm run setup` default to `minimal`. Legacy upgrades stay `off` until explicitly configured. The first-run telemetry notice is informational only.
+
+For the full public contract, exact payload fields, and retention policy, see [TELEMETRY.md](TELEMETRY.md).
+
 ### API Keys (Optional)
 
 | Variable | Description |

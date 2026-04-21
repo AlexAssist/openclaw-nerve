@@ -31,6 +31,15 @@ Unless the user clearly asks for something else, use these defaults:
 - if the setup wizard is unavailable, skipped, or fails: fall back to explicit manual config
 - install, configure, and validate before reporting completion
 
+## Telemetry defaults
+
+- Fresh installs created by `install.sh` or `npm run setup` default to `minimal` telemetry.
+- Legacy upgrades stay `off` until explicitly configured.
+- The first-run telemetry notice appears only for fresh installs in `minimal` mode.
+- The first-run notice is informational only. It does not change the server setting.
+- To disable telemetry entirely, set `NERVE_TELEMETRY_MODE=off` in `.env` and restart Nerve.
+- For the exact telemetry contract, see [TELEMETRY.md](./TELEMETRY.md).
+
 ## Existing install handling
 
 If `~/nerve` already exists:
