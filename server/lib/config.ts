@@ -73,7 +73,7 @@ export const config = {
 
   // Telemetry
   telemetryModeRaw: process.env.NERVE_TELEMETRY_MODE || '',
-  telemetryDir: process.env.NERVE_TELEMETRY_DIR || path.join(HOME, '.nerve', 'telemetry'),
+  telemetryDir: process.env.NERVE_TELEMETRY_DIR || path.join(PROJECT_ROOT, '.nerve', 'telemetry'),
   telemetryPhase1BaseUrl: 'https://telemetry.nerve.zone',
   telemetryPhase2BaseUrl: 'https://analytics.nerve.zone',
   telemetryPublicDocUrl: '/api/telemetry/docs',

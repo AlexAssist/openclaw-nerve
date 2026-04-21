@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type TelemetryMode = 'off' | 'minimal' | 'detailed';
 export type InstallMethod = 'release' | 'source' | 'unknown';
@@ -25,12 +25,14 @@ export interface BootstrapMarker {
   source: MetadataSource;
 }
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = process.env.NERVE_PROJECT_ROOT || path.resolve(__dirname, '..', '..', '..');
 const IDENTITY_FILE = 'identity.json';
 const INSTALL_METHOD_FILE = 'install-method.json';
 const BOOTSTRAP_FILE = 'bootstrap.json';
 
 function telemetryDir(): string {
-  return process.env.NERVE_TELEMETRY_DIR || path.join(process.env.HOME || os.homedir(), '.nerve', 'telemetry');
+  return process.env.NERVE_TELEMETRY_DIR || path.join(PROJECT_ROOT, '.nerve', 'telemetry');
 }
 
 function telemetryPath(fileName: string): string {

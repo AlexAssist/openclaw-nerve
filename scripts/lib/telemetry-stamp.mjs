@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
@@ -53,7 +52,7 @@ function parseArgs(argv) {
 }
 
 function telemetryDir(override) {
-  return override || process.env.NERVE_TELEMETRY_DIR || path.join(process.env.HOME || os.homedir(), '.nerve', 'telemetry');
+  return override || process.env.NERVE_TELEMETRY_DIR || path.join(process.env.NERVE_PROJECT_ROOT || process.cwd(), '.nerve', 'telemetry');
 }
 
 function ensureDir(dir) {

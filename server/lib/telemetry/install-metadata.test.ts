@@ -116,6 +116,22 @@ describe('telemetry install metadata', () => {
     expect(readBootstrapMarker()).toEqual(written);
   });
 
+  it('defaults local telemetry metadata to a checkout-scoped .nerve directory', async () => {
+    process.env = {
+      ...originalEnv,
+      NERVE_PROJECT_ROOT: tempDir,
+    };
+
+    vi.resetModules();
+    ({ writeBootstrapMarker } = await import('./install-metadata.js'));
+
+    writeBootstrapMarker('fresh_install', 'setup', '2026-04-21T00:00:00Z');
+
+    const stored = JSON.parse(fs.readFileSync(path.join(tempDir, '.nerve', 'telemetry', 'bootstrap.json'), 'utf8'));
+    expect(stored.kind).toBe('fresh_install');
+    expect(stored.source).toBe('setup');
+  });
+
   it('writes a legacy upgrade marker only when no trusted fresh-install marker exists', () => {
     const written = ensureLegacyUpgradeMarker({ envMode: undefined, stampedAt: '2026-04-21T00:00:00Z' });
 

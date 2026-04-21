@@ -136,12 +136,14 @@ curl -fsSL https://raw.githubusercontent.com/daggerhashimoto/openclaw-nerve/mast
 
 If the installer finishes and the setup wizard is available, use it.
 
-If no TTY is available and the target remains the safe local path, you may use:
+If no TTY is available and this is a brand-new safe local install, you may use:
 
 ```bash
 cd ~/nerve
-npm run setup -- --defaults
+npm run setup -- --defaults --fresh-install
 ```
+
+If you are rerunning setup for an existing checkout or regenerating `.env`, omit `--fresh-install`.
 
 If the requested topology is LAN, Tailscale, remote gateway, cloud, or any other non-localhost path, do not guess. Ask first unless the user already specified that topology clearly.
 

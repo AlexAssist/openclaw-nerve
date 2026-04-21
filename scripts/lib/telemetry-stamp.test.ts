@@ -41,6 +41,14 @@ describe('telemetry-stamp.mjs', () => {
     });
   }
 
+  function runStampWithDefaultDir(cwd: string, ...args: string[]) {
+    execFileSync(process.execPath, [STAMP_SCRIPT, ...args], {
+      cwd,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+  }
+
   function readStampFromDir(dir: string, kind: 'install-method' | 'bootstrap'): Record<string, unknown> | undefined {
     const fileName = kind === 'install-method' ? 'install-method.json' : 'bootstrap.json';
     const filePath = path.join(dir, fileName);
@@ -62,6 +70,17 @@ describe('telemetry-stamp.mjs', () => {
     readOnlyDirs.push(dir);
     return dir;
   }
+
+  it('defaults local telemetry stamps to a checkout-scoped .nerve directory', () => {
+    const projectRoot = path.join(tempDir, 'project');
+    fs.mkdirSync(projectRoot, { recursive: true });
+
+    runStampWithDefaultDir(projectRoot, 'bootstrap', 'fresh_install', '--source', 'setup');
+
+    const stamp = readStampFromDir(path.join(projectRoot, '.nerve', 'telemetry'), 'bootstrap');
+    expect(stamp?.kind).toBe('fresh_install');
+    expect(stamp?.source).toBe('setup');
+  });
 
   describe('install-method stamping', () => {
     it('stamps release install method', () => {

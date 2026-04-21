@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   HEARTBEAT_REASONS,
   TELEMETRY_FEATURE_NAMES,
@@ -12,6 +12,8 @@ import {
   type TelemetryWindowSnapshot,
 } from './types.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = process.env.NERVE_PROJECT_ROOT || path.resolve(__dirname, '..', '..', '..');
 const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;
 const STATE_SCHEMA_VERSION = 1;
 
@@ -66,8 +68,7 @@ export interface TelemetryStore {
 }
 
 function defaultStateFile(): string {
-  const home = process.env.HOME || os.homedir();
-  const telemetryDir = process.env.NERVE_TELEMETRY_DIR || path.join(home, '.nerve', 'telemetry');
+  const telemetryDir = process.env.NERVE_TELEMETRY_DIR || path.join(PROJECT_ROOT, '.nerve', 'telemetry');
   return path.join(telemetryDir, 'phase1-state.json');
 }
 

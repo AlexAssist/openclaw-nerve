@@ -20,6 +20,7 @@ import { networkInterfaces } from 'node:os';
 import { input, password, confirm, select } from '@inquirer/prompts';
 import { printBanner, section, success, warn, fail, info, dim, promptTheme } from './lib/banner.js';
 import { checkPrerequisites, type PrereqResult } from './lib/prereq-check.js';
+import { resolveFreshInstallDisposition, resolveSetupInstallMethod } from './lib/setup-telemetry.js';
 import {
   isValidUrl,
   isValidPort,
@@ -126,16 +127,12 @@ function stampTelemetry(
   }
 }
 
-function resolveSetupInstallMethod(): 'release' | 'source' {
-  return process.env.NERVE_SETUP_INSTALL_METHOD === 'release' ? 'release' : 'source';
-}
-
 function finalizeSetupTelemetry(isFreshInstall: boolean): void {
   // Only confirmed fresh installs should rewrite provenance.
   // Legacy installs (missing provenance) must remain unknown, but a real
-  // fresh install should replace any stale global markers from older installs.
+  // fresh install should replace any stale per-install markers from older runs.
   if (isFreshInstall) {
-    stampTelemetry('install-method', resolveSetupInstallMethod(), { source: 'setup' });
+    stampTelemetry('install-method', resolveSetupInstallMethod(process.env.NERVE_SETUP_INSTALL_METHOD), { source: 'setup' });
     stampTelemetry('bootstrap', 'fresh_install', { source: 'setup' });
   }
 }
@@ -145,24 +142,17 @@ function hasBuildOutput(): boolean {
 }
 
 async function resolveFreshInstall(hasExisting: boolean): Promise<boolean> {
-  if (hasExisting) {
-    return false;
-  }
+  const disposition = resolveFreshInstallDisposition({
+    hasExisting,
+    envFreshInstall: process.env.NERVE_SETUP_FRESH_INSTALL === '1',
+    cliFreshInstall: isFreshInstallFlag,
+    invokedFromInstaller: Boolean(process.env.NERVE_INSTALLER),
+    defaultsMode: isDefaults,
+    hasTty: process.stdin.isTTY === true,
+  });
 
-  if (process.env.NERVE_SETUP_FRESH_INSTALL === '1' || isFreshInstallFlag) {
-    return true;
-  }
-
-  if (process.env.NERVE_INSTALLER) {
-    return false;
-  }
-
-  if (isDefaults) {
-    return true;
-  }
-
-  if (process.stdin.isTTY !== true) {
-    return false;
+  if (disposition !== 'prompt') {
+    return disposition;
   }
 
   return confirm({
@@ -312,7 +302,7 @@ async function main(): Promise<void> {
     npm run setup                                     # Interactive setup
     npm run setup -- --check                          # Validate existing config
     npm run setup -- --defaults                       # Auto-configure with detected values
-    npm run setup -- --defaults --fresh-install
+    npm run setup -- --defaults --fresh-install       # Brand-new non-interactive install
     npm run setup -- --defaults --access-mode tailscale-serve
 `);
     return;

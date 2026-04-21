@@ -15,7 +15,7 @@ NERVE_TELEMETRY_MODE=minimal
 NERVE_TELEMETRY_MODE=detailed
 
 # Local metadata and aggregate state directory
-NERVE_TELEMETRY_DIR=~/.nerve/telemetry
+NERVE_TELEMETRY_DIR=<PROJECT_ROOT>/.nerve/telemetry
 ```
 
 To disable telemetry completely:
@@ -24,7 +24,7 @@ To disable telemetry completely:
 2. Set `NERVE_TELEMETRY_MODE=off`.
 3. Restart Nerve.
 
-Fresh installs created by `install.sh` or `npm run setup` default to `minimal`. Legacy upgrades stay `off` until explicitly configured. The first-run notice is informational only, not a consent toggle.
+Fresh installs confirmed by `install.sh` or `npm run setup` default to `minimal`. For non-interactive source setup, pass `--fresh-install` when you want brand-new install defaults. Legacy upgrades stay `off` until explicitly configured. The first-run notice is informational only, not a consent toggle.
 
 ## Effective mode resolution
 
@@ -44,7 +44,7 @@ That means:
 
 ## Local files written by telemetry
 
-By default, Nerve stores local telemetry metadata in `~/.nerve/telemetry`.
+By default, Nerve stores local telemetry metadata in `<PROJECT_ROOT>/.nerve/telemetry`.
 
 | File | Purpose |
 | --- | --- |
