@@ -38,6 +38,8 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { createCommands } from '@/features/command-palette/commands';
 import { PanelErrorBoundary } from '@/components/PanelErrorBoundary';
 import { SpawnAgentDialog } from '@/features/sessions/SpawnAgentDialog';
+import { TelemetryNotice } from '@/features/telemetry/TelemetryNotice';
+import { emitBranchSwitched } from '@/features/telemetry/telemetryClient';
 import { DEFAULT_CHAT_PATH_LINKS_CONFIG, parseChatPathLinksConfig } from '@/features/chat/chatPathLinks';
 import { FileTreePanel, TabbedContentArea, useOpenFiles, type FileTreeChangeEvent } from '@/features/file-browser';
 import { type BeadLinkTarget, type OpenBeadTab, buildBeadTabId } from '@/features/beads';
@@ -102,6 +104,7 @@ export default function App({ onLogout }: AppProps) {
     busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, abortSession, spawnSession, renameSession,
     agentLogEntries, eventEntries,
     agentName,
+    telemetry,
   } = useSessionContext();
 
   // Chat state
@@ -670,13 +673,25 @@ export default function App({ onLogout }: AppProps) {
     }
   }, [discardAllDirtyFiles, pendingWorkspaceSwitch, workspaceSwitchAction]);
 
+  const maybeEmitBranchSwitchTelemetry = useCallback((fromSessionKey: string, toSessionKey: string) => {
+    if (!fromSessionKey || !toSessionKey) return;
+    if (getWorkspaceRootSessionKey(fromSessionKey) === getWorkspaceRootSessionKey(toSessionKey)) return;
+    void emitBranchSwitched({ success: true });
+  }, []);
+
   const handleSessionChange = useCallback((key: string) => {
+    const previousSessionKey = currentSession;
     void requestWorkspaceTransition(key, getWorkspaceSwitchLabel(key), async () => {
       setCurrentSession(key);
+    }).then((didSwitch) => {
+      if (didSwitch) {
+        maybeEmitBranchSwitchTelemetry(previousSessionKey, key);
+      }
     });
-  }, [getWorkspaceSwitchLabel, requestWorkspaceTransition, setCurrentSession]);
+  }, [currentSession, getWorkspaceSwitchLabel, maybeEmitBranchSwitchTelemetry, requestWorkspaceTransition, setCurrentSession]);
 
-  const handleSpawnSession = useCallback((opts: SpawnSessionOpts) => {
+  const handleSpawnSession = useCallback(async (opts: SpawnSessionOpts) => {
+    const previousSessionKey = currentSession;
     const targetSessionKey = opts.kind === 'root'
       ? buildAgentRootSessionKey(opts.agentName?.trim() || 'agent', sessions.map(getSessionKey))
       : opts.parentSessionKey?.trim() || getWorkspaceRootSessionKey(currentSession) || currentSession;
@@ -684,10 +699,14 @@ export default function App({ onLogout }: AppProps) {
       ? opts.agentName?.trim() || 'New agent'
       : getWorkspaceSwitchLabel(targetSessionKey);
 
-    return requestWorkspaceTransition(targetSessionKey, targetLabel, async () => {
+    const didSwitch = await requestWorkspaceTransition(targetSessionKey, targetLabel, async () => {
       await spawnSession(opts);
     });
-  }, [currentSession, getWorkspaceSwitchLabel, requestWorkspaceTransition, sessions, spawnSession]);
+
+    if (didSwitch) {
+      maybeEmitBranchSwitchTelemetry(previousSessionKey, targetSessionKey);
+    }
+  }, [currentSession, getWorkspaceSwitchLabel, maybeEmitBranchSwitchTelemetry, requestWorkspaceTransition, sessions, spawnSession]);
 
   // Boot sequence: fade in panels when connected
   useEffect(() => {
@@ -970,6 +989,12 @@ export default function App({ onLogout }: AppProps) {
           <span className="min-w-0 text-left leading-5">{gatewayRestartNotice.message}</span>
         </button>
       )}
+
+      <TelemetryNotice
+        visible={telemetry.showFreshInstallNotice}
+        mode={telemetry.mode}
+        publicDocUrl={telemetry.publicDocUrl}
+      />
       
       {(!isCompactLayout || !isMobileTopBarHidden) && (
         <TopBar

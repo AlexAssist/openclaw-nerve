@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import {
+  buildBranchSwitchedEvent,
   buildKanbanTaskCreatedEvent,
   buildMessageSubmittedEvent,
   buildSessionCreatedEvent,
@@ -70,6 +71,13 @@ export interface RecordKanbanTaskCreatedInput {
   occurredAt?: Date | string | number;
 }
 
+export interface RecordClientDetailedEventInput {
+  event: 'branch_switched';
+  properties: {
+    success: boolean;
+  };
+}
+
 export interface TelemetryServerInfoDisclosure {
   telemetryMode: TelemetryMode;
   telemetryEnabled: boolean;
@@ -86,6 +94,7 @@ export interface TelemetryRuntime {
   recordMessageSubmitted(input?: RecordMessageSubmittedInput | Date | string | number): Promise<void>;
   recordToolCompleted(input: RecordToolTelemetryInput): Promise<void>;
   recordKanbanTaskCreated(input: RecordKanbanTaskCreatedInput): Promise<void>;
+  recordClientDetailedEvent(input: RecordClientDetailedEventInput): Promise<void>;
   markFeatureUsed(feature: TelemetryFeatureName, at?: Date | string | number): Promise<void>;
   markSessionSeen(sessionKey: string): Promise<MarkSessionSeenResult>;
   reportError(input: ReportTelemetryErrorInput): Promise<void>;
@@ -408,6 +417,22 @@ export function createTelemetryRuntime(options: CreateTelemetryRuntimeOptions): 
         success: input.success,
         sentAt: input.occurredAt,
       }));
+    },
+
+    async recordClientDetailedEvent(input) {
+      if (!detailedTelemetryEnabled()) {
+        return;
+      }
+
+      if (input.event === 'branch_switched') {
+        sendDetailedEvent(buildBranchSwitchedEvent({
+          identity: { instanceId },
+          appVersion: options.appVersion,
+          installMethod,
+          success: input.properties.success,
+          sentAt: now(),
+        }));
+      }
     },
 
     async markFeatureUsed(feature, at) {

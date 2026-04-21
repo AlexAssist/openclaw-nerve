@@ -7,11 +7,24 @@ import { getSessionDisplayLabel } from '@/features/sessions/sessionKeys';
 const mockUseGateway = vi.fn();
 const mockUseSettings = vi.fn();
 const playPingMock = vi.fn();
+const telemetryClientMocks = vi.hoisted(() => ({
+  emitSessionOpened: vi.fn(async () => undefined),
+  emitBranchCreated: vi.fn(async () => undefined),
+}));
 let rpcMock: ReturnType<typeof vi.fn>;
 let subscribeMock: ReturnType<typeof vi.fn>;
 let connectionStateValue: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' = 'connected';
 let subscribedHandler: ((msg: GatewayEvent) => void) | null = null;
 let soundEnabledValue = true;
+let serverInfoResponse: {
+  agentName?: string;
+  defaultAgentWorkspaceRoot?: string | null;
+  telemetry?: {
+    mode: 'off' | 'minimal' | 'detailed';
+    publicDocUrl: string;
+    showFreshInstallNotice: boolean;
+  };
+};
 
 vi.mock('./GatewayContext', () => ({
   useGateway: () => mockUseGateway(),
@@ -23,6 +36,11 @@ vi.mock('./SettingsContext', () => ({
 
 vi.mock('@/features/voice/audio-feedback', () => ({
   playPing: (...args: unknown[]) => playPingMock(...args),
+}));
+
+vi.mock('@/features/telemetry/telemetryClient', () => ({
+  emitSessionOpened: (...args: unknown[]) => telemetryClientMocks.emitSessionOpened(...args),
+  emitBranchCreated: (...args: unknown[]) => telemetryClientMocks.emitBranchCreated(...args),
 }));
 
 function jsonResponse(data: unknown): Response {
@@ -86,6 +104,18 @@ function SessionStatusProbe() {
   return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
 }
 
+function SessionTelemetryProbe() {
+  const { telemetry } = useSessionContext();
+
+  return (
+    <div>
+      <div data-testid="telemetry-mode">{telemetry.mode}</div>
+      <div data-testid="telemetry-doc">{telemetry.publicDocUrl}</div>
+      <div data-testid="telemetry-fresh">{String(telemetry.showFreshInstallNotice)}</div>
+    </div>
+  );
+}
+
 describe('SessionContext', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -96,6 +126,16 @@ describe('SessionContext', () => {
     subscribedHandler = null;
     soundEnabledValue = true;
     connectionStateValue = 'connected';
+    telemetryClientMocks.emitSessionOpened.mockReset();
+    telemetryClientMocks.emitBranchCreated.mockReset();
+    serverInfoResponse = {
+      agentName: 'Jen',
+      telemetry: {
+        mode: 'minimal',
+        publicDocUrl: 'https://example.com/telemetry',
+        showFreshInstallNotice: false,
+      },
+    };
 
     rpcMock = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === 'sessions.list') {
@@ -138,7 +178,7 @@ describe('SessionContext', () => {
           ? input.toString()
           : input.url;
 
-      if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse({ agentName: 'Jen' }));
+      if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse(serverInfoResponse));
       if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
       if (url.includes('/api/sessions/hidden')) return Promise.resolve(jsonResponse({ ok: true, sessions: [] }));
       return Promise.resolve(jsonResponse({}));
@@ -158,6 +198,59 @@ describe('SessionContext', () => {
     screen.getByTestId('spawn').click();
     await waitFor(() => {
       expect(rpcMock).toHaveBeenCalledWith('agents.create', expect.objectContaining({ name: 'Test' }));
+    });
+  });
+
+  it('exposes telemetry disclosure from server-info', async () => {
+    serverInfoResponse.telemetry = {
+      mode: 'minimal',
+      publicDocUrl: 'https://example.com/telemetry-docs',
+      showFreshInstallNotice: true,
+    };
+
+    render(<SessionProvider><SessionTelemetryProbe /></SessionProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('telemetry-mode')).toHaveTextContent('minimal');
+      expect(screen.getByTestId('telemetry-doc')).toHaveTextContent('https://example.com/telemetry-docs');
+      expect(screen.getByTestId('telemetry-fresh')).toHaveTextContent('true');
+    });
+  });
+
+  it('emits session_opened when selecting a different session', async () => {
+    render(<SessionProvider><SessionUnreadProbe /></SessionProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:main:main');
+    });
+    telemetryClientMocks.emitSessionOpened.mockClear();
+
+    await act(async () => {
+      screen.getByTestId('select-reviewer').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-session').textContent).toBe('agent:reviewer:main');
+    });
+    expect(telemetryClientMocks.emitSessionOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits branch_created after a new top-level root agent is created', async () => {
+    function Spawn() {
+      const { spawnSession } = useSessionContext();
+      return <button data-testid="spawn-root" onClick={() => spawnSession({ kind: 'root', agentName: 'New Root', task: 'hi' })} />;
+    }
+
+    render(<SessionProvider><Spawn /></SessionProvider>);
+    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    telemetryClientMocks.emitBranchCreated.mockClear();
+
+    await act(async () => {
+      screen.getByTestId('spawn-root').click();
+    });
+
+    await waitFor(() => {
+      expect(telemetryClientMocks.emitBranchCreated).toHaveBeenCalledTimes(1);
     });
   });
 
