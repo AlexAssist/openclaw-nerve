@@ -75,6 +75,13 @@ function getAgentIdFromSessionKey(sessionKey: string): string {
   return match?.[1] || 'main';
 }
 
+function runInBackground(work: Promise<unknown>): void {
+  void work.catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[sessions] spawn-subagent telemetry failed:', message);
+  });
+}
+
 function resolveSessionsDir(agentId?: string): string {
   const normalized = normalizeAgentId(agentId);
   if (normalized === 'main') return config.sessionsDir;
@@ -382,11 +389,14 @@ app.post('/api/sessions/spawn-subagent', rateLimitGeneral, async (c) => {
       cleanup: parsed.data.cleanup,
     });
 
-    await getTelemetryRuntime()?.recordSessionCreated({
-      sessionKey: result.sessionKey,
-      surface: 'sessions',
-      explicit: true,
-    });
+    const telemetry = getTelemetryRuntime();
+    if (telemetry) {
+      runInBackground(telemetry.recordSessionCreated({
+        sessionKey: result.sessionKey,
+        surface: 'sessions',
+        explicit: true,
+      }));
+    }
 
     return c.json({
       ok: true,

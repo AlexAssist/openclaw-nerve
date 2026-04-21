@@ -334,6 +334,40 @@ describe('sessions routes', () => {
     expect(telemetryRuntimeMock.recordMessageSubmitted).not.toHaveBeenCalled();
   });
 
+  it('still returns success when spawn-subagent telemetry recording fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    spawnSubagentMock.mockResolvedValueOnce({
+      sessionKey: 'agent:reviewer:subagent:spawned-telemetry-failure',
+      runId: 'run-telemetry-failure',
+      mode: 'direct',
+    });
+    telemetryRuntimeMock.recordSessionCreated.mockRejectedValueOnce(new Error('telemetry write failed'));
+
+    const app = await buildApp();
+    const res = await app.request('/api/sessions/spawn-subagent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parentSessionKey: 'agent:reviewer:main',
+        task: 'do something useful',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json).toEqual({
+      ok: true,
+      sessionKey: 'agent:reviewer:subagent:spawned-telemetry-failure',
+      runId: 'run-telemetry-failure',
+      mode: 'direct',
+    });
+
+    await Promise.resolve();
+
+    expect(telemetryRuntimeMock.recordSessionCreated).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith('[sessions] spawn-subagent telemetry failed:', 'telemetry write failed');
+  });
+
   it('returns marker success payload when helper falls back to marker mode', async () => {
     spawnSubagentMock.mockResolvedValueOnce({
       sessionKey: 'agent:reviewer:subagent:from-marker',
