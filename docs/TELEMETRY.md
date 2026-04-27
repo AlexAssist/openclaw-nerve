@@ -59,9 +59,9 @@ The local store is used to compute trailing 24 hour snapshots. It does not store
 
 | Mode | What happens |
 | --- | --- |
-| `off` | Nothing is sent to `telemetry.nerve.zone` or `analytics.nerve.zone`. |
-| `minimal` | Phase 1 only: heartbeat snapshots and scrubbed server-side error reports are sent to `telemetry.nerve.zone`. |
-| `detailed` | Includes all `minimal` telemetry plus the approved Phase 2 detailed events sent to `analytics.nerve.zone`. |
+| `off` | Nothing is sent to the configured telemetry endpoints. |
+| `minimal` | Phase 1 only: heartbeat snapshots and scrubbed server-side error reports are sent to the configured Phase 1 base URL, which defaults to `https://telemetry-nerve-zone.netlify.app`. |
+| `detailed` | Includes all `minimal` telemetry plus the approved Phase 2 detailed events sent to the configured Phase 2 base URL. The current default is also `https://telemetry-nerve-zone.netlify.app`, so keep `detailed` off until `/v1/events` exists there. |
 
 ## Data that may never leave the box
 
@@ -89,18 +89,18 @@ This applies to both Phase 1 and Phase 2.
 
 ### Phase 1
 
-Nerve sends Phase 1 traffic to first-party infrastructure at `telemetry.nerve.zone`:
+By default Nerve sends Phase 1 traffic to the current first-party Netlify deployment at `https://telemetry-nerve-zone.netlify.app`. Override this with `NERVE_TELEMETRY_PHASE1_BASE_URL` when needed.
 
-- `https://telemetry.nerve.zone/v1/heartbeat`
-- `https://telemetry.nerve.zone/v1/error`
+- `https://telemetry-nerve-zone.netlify.app/v1/heartbeat`
+- `https://telemetry-nerve-zone.netlify.app/v1/error`
 
 ### Phase 2
 
-Nerve sends Phase 2 traffic to first-party infrastructure at `analytics.nerve.zone`:
+Nerve uses `NERVE_TELEMETRY_PHASE2_BASE_URL` for approved Phase 2 detailed events. The current default is also `https://telemetry-nerve-zone.netlify.app`, so production `detailed` mode must stay off until that destination exposes:
 
-- `https://analytics.nerve.zone/v1/events`
+- `https://telemetry-nerve-zone.netlify.app/v1/events`
 
-Browser-originated telemetry never posts directly to `analytics.nerve.zone`. The browser sends tiny same-origin relay payloads to:
+Browser-originated telemetry never posts directly to the configured Phase 2 base URL. The browser sends tiny same-origin relay payloads to:
 
 - `POST /api/telemetry/events`
 

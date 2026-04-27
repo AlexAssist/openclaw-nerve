@@ -160,6 +160,8 @@ AGENT_NAME=Friday
 |----------|---------|-------------|
 | `NERVE_TELEMETRY_MODE` | *(effective default depends on install state)* | Telemetry mode: `off`, `minimal`, or `detailed` |
 | `NERVE_TELEMETRY_DIR` | `<PROJECT_ROOT>/.nerve/telemetry` | Local directory for telemetry metadata and rolling aggregate state |
+| `NERVE_TELEMETRY_PHASE1_BASE_URL` | `https://telemetry-nerve-zone.netlify.app` | Base URL for Phase 1 heartbeat and error delivery |
+| `NERVE_TELEMETRY_PHASE2_BASE_URL` | `https://telemetry-nerve-zone.netlify.app` | Base URL for Phase 2 detailed-event delivery. Keep `detailed` off until `/v1/events` is live there |
 
 ```bash
 # Disable telemetry entirely
@@ -171,6 +173,10 @@ NERVE_TELEMETRY_MODE=detailed
 
 # Optional custom local state dir
 NERVE_TELEMETRY_DIR=<PROJECT_ROOT>/.nerve/telemetry
+
+# Optional endpoint overrides
+NERVE_TELEMETRY_PHASE1_BASE_URL=https://telemetry-nerve-zone.netlify.app
+NERVE_TELEMETRY_PHASE2_BASE_URL=https://telemetry-nerve-zone.netlify.app
 ```
 
 Mode resolution is:

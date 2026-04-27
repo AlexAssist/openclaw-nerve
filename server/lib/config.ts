@@ -29,6 +29,8 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
 const HOME = process.env.HOME || os.homedir();
 const SUPPORTED_LANGUAGE_CODES = new Set(SUPPORTED_LANGUAGES.map((l) => l.code));
+const DEFAULT_TELEMETRY_PHASE1_BASE_URL = 'https://telemetry-nerve-zone.netlify.app';
+const DEFAULT_TELEMETRY_PHASE2_BASE_URL = 'https://telemetry-nerve-zone.netlify.app';
 
 const LANGUAGE_ENV_VALUE = process.env.NERVE_LANGUAGE ?? process.env.LANGUAGE;
 
@@ -40,6 +42,15 @@ function normalizeLanguagePreference(language: string | undefined): string {
   if (!SUPPORTED_LANGUAGE_CODES.has(code)) return DEFAULT_LANGUAGE;
 
   return code;
+}
+
+function isValidTelemetryBaseUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 export const config = {
@@ -74,8 +85,8 @@ export const config = {
   // Telemetry
   telemetryModeRaw: process.env.NERVE_TELEMETRY_MODE || '',
   telemetryDir: process.env.NERVE_TELEMETRY_DIR || path.join(PROJECT_ROOT, '.nerve', 'telemetry'),
-  telemetryPhase1BaseUrl: 'https://telemetry.nerve.zone',
-  telemetryPhase2BaseUrl: 'https://analytics.nerve.zone',
+  telemetryPhase1BaseUrl: process.env.NERVE_TELEMETRY_PHASE1_BASE_URL?.trim() || DEFAULT_TELEMETRY_PHASE1_BASE_URL,
+  telemetryPhase2BaseUrl: process.env.NERVE_TELEMETRY_PHASE2_BASE_URL?.trim() || DEFAULT_TELEMETRY_PHASE2_BASE_URL,
   telemetryPublicDocUrl: '/api/telemetry/docs',
 
   // Agent identity (used in UI)
@@ -290,6 +301,25 @@ export function validateConfig(): void {
     console.warn(
       `[config] ⚠ Invalid NERVE_TELEMETRY_MODE=${config.telemetryModeRaw} — valid values are off, minimal, or detailed. Falling back to off.`,
     );
+  }
+
+  const mutableConfig = config as typeof config & {
+    telemetryPhase1BaseUrl: string;
+    telemetryPhase2BaseUrl: string;
+  };
+
+  if (!isValidTelemetryBaseUrl(config.telemetryPhase1BaseUrl)) {
+    console.warn(
+      `[config] ⚠ Invalid NERVE_TELEMETRY_PHASE1_BASE_URL=${config.telemetryPhase1BaseUrl} — expected absolute http(s) URL. Falling back to ${DEFAULT_TELEMETRY_PHASE1_BASE_URL}.`,
+    );
+    mutableConfig.telemetryPhase1BaseUrl = DEFAULT_TELEMETRY_PHASE1_BASE_URL;
+  }
+
+  if (!isValidTelemetryBaseUrl(config.telemetryPhase2BaseUrl)) {
+    console.warn(
+      `[config] ⚠ Invalid NERVE_TELEMETRY_PHASE2_BASE_URL=${config.telemetryPhase2BaseUrl} — expected absolute http(s) URL. Falling back to ${DEFAULT_TELEMETRY_PHASE2_BASE_URL}.`,
+    );
+    mutableConfig.telemetryPhase2BaseUrl = DEFAULT_TELEMETRY_PHASE2_BASE_URL;
   }
 
   // STT validation
