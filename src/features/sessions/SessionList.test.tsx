@@ -32,6 +32,26 @@ describe('SessionList active state detection', () => {
 
     expect(screen.queryByTitle('Abort session')).not.toBeInTheDocument();
   });
+
+  it('does not expose abort when explicit inactive run flags contradict stale running status', () => {
+    const sessions: Session[] = [
+      { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, status: 'running' },
+    ];
+
+    renderSessionList({ sessions, onAbort: vi.fn() });
+
+    expect(screen.queryByTitle('Abort session')).not.toBeInTheDocument();
+  });
+
+  it('does not let an inactive child-run flag suppress a running root session', () => {
+    const sessions: Session[] = [
+      { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveSubagentRun: false, status: 'running' },
+    ];
+
+    renderSessionList({ sessions, onAbort: vi.fn() });
+
+    expect(screen.getByTitle('Abort session')).toBeInTheDocument();
+  });
 });
 
 describe('SessionList empty state', () => {

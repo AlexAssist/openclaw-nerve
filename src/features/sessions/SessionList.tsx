@@ -59,17 +59,35 @@ function lowerString(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function sessionHasExplicitActiveRun(session: Session): boolean {
+  return session.hasActiveRun === true
+    || session.hasActiveSubagentRun === true
+    || session.busy === true
+    || session.processing === true;
+}
+
+function sessionHasExplicitInactiveRun(session: Session): boolean {
+  return session.hasActiveRun === false
+    || session.busy === false
+    || session.processing === false;
+}
+
 function sessionLooksTerminal(session: Session): boolean {
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return true;
+  if (sessionHasExplicitActiveRun(session)) return false;
+  if (sessionHasExplicitInactiveRun(session)) return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => TERMINAL_SESSION_STATES.has(state));
 }
 
 function sessionLooksActive(session: Session): boolean {
+  const phase = lowerString(session.phase);
+  if (phase === 'end' || phase === 'error') return false;
+  if (sessionHasExplicitActiveRun(session)) return true;
+  if (sessionHasExplicitInactiveRun(session)) return false;
   if (sessionLooksTerminal(session)) return false;
-  if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => ACTIVE_SESSION_STATES.has(state));

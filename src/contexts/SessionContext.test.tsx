@@ -83,7 +83,25 @@ function SessionUnreadProbe() {
 
 function SessionStatusProbe() {
   const { agentStatus } = useSessionContext();
-  return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
+  const status = agentStatus['agent:reviewer:main'];
+  return (
+    <div>
+      <div data-testid="reviewer-status">{status?.status ?? 'NONE'}</div>
+      <div data-testid="reviewer-tool">{status?.toolName ?? 'NONE'}</div>
+    </div>
+  );
+}
+
+function SessionSnapshotProbe() {
+  const { sessions } = useSessionContext();
+  const session = sessions.find((s) => getSessionKey(s) === 'agent:reviewer:main');
+  return (
+    <div>
+      <div data-testid="reviewer-phase">{session?.phase ?? 'NONE'}</div>
+      <div data-testid="reviewer-snapshot-status">{session?.status ?? 'NONE'}</div>
+      <div data-testid="reviewer-active-run">{String(session?.hasActiveRun)}</div>
+    </div>
+  );
 }
 
 function SessionBusyProbe() {
@@ -365,6 +383,182 @@ describe('SessionContext', () => {
     await waitFor(() => {
       expect(screen.getByTestId('reviewer-status').textContent).toBe('ERROR');
       expect(screen.getByTestId('reviewer-busy').textContent).toBe('false');
+    });
+  });
+
+  it('persists phase-only subscribed terminal snapshots so stale running status stays terminal', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: true, status: 'running', phase: 'start' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', phase: 'end' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('DONE');
+      expect(screen.getByTestId('reviewer-phase').textContent).toBe('end');
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('false');
+    });
+  });
+
+  it('clears stale terminal status when a phase-only subscribed snapshot starts', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: false, status: 'done', phase: 'end' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionSnapshotProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-snapshot-status').textContent).toBe('done');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'agent:reviewer:main', phase: 'start' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-phase').textContent).toBe('start');
+      expect(screen.getByTestId('reviewer-snapshot-status').textContent).toBe('running');
+      expect(screen.getByTestId('reviewer-active-run').textContent).toBe('true');
+    });
+  });
+
+  it('does not let stale running status mask terminal agentState snapshots', async () => {
+    let terminal = false;
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            terminal
+              ? { sessionKey: 'agent:reviewer:main', label: 'Reviewer', status: 'running', agentState: 'aborted' }
+              : { sessionKey: 'agent:reviewer:main', label: 'Reviewer', status: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+        <SessionRefreshProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+
+    terminal = true;
+    await act(async () => {
+      screen.getByTestId('refresh-sessions').click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+    });
+  });
+
+  it('maps legacy failed and cancelled agent states to terminal error/idle badges', async () => {
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandler).toBeTruthy());
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'agent',
+        payload: { sessionKey: 'agent:reviewer:main', state: 'failed' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('ERROR');
+    });
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'agent',
+        payload: { sessionKey: 'agent:reviewer:main', state: 'cancelled' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('IDLE');
+    });
+  });
+
+  it('hydrates tool status from session.tool events without a stream discriminator', async () => {
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandler).toBeTruthy());
+
+    act(() => {
+      subscribedHandler?.({
+        type: 'event',
+        event: 'session.tool',
+        payload: {
+          sessionKey: 'agent:reviewer:main',
+          data: { phase: 'start', name: 'read', args: { path: 'README.md' } },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+      expect(screen.getByTestId('reviewer-tool').textContent).toBe('read');
     });
   });
 

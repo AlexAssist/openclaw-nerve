@@ -108,8 +108,14 @@ function lowerString(value: unknown): string {
 
 function sessionLooksActive(session?: Partial<Session & EventPayload> | null): boolean {
   if (!session) return false;
-  if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
-  if (lowerString(session.phase) === 'start') return true;
+  const phase = lowerString(session.phase);
+  if (phase === 'end' || phase === 'error') return false;
+  // The chat pane should only hydrate the selected session's own run. A parent
+  // with only an active child/subagent belongs in the sidebar, not Stop/send UI.
+  if (session.hasActiveSubagentRun === true && session.hasActiveRun !== true) return false;
+  if (session.hasActiveRun === true || session.busy === true || session.processing === true) return true;
+  if (session.hasActiveRun === false || session.busy === false || session.processing === false) return false;
+  if (phase === 'start') return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => ACTIVE_SESSION_STATES.has(state));
@@ -119,6 +125,8 @@ function sessionLooksTerminal(session?: Partial<Session & EventPayload> | null):
   if (!session) return false;
   const phase = lowerString(session.phase);
   if (phase === 'end' || phase === 'error') return true;
+  if (session.hasActiveRun === true || session.busy === true || session.processing === true) return false;
+  if (session.hasActiveRun === false) return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => TERMINAL_SESSION_STATES.has(state));
@@ -393,15 +401,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const payload = (msg.payload || {}) as EventPayload;
 
       if ((msg.event === 'sessions.changed' || msg.event === 'session.message') && payload.sessionKey === currentSk) {
-        const stateHint = payload.state || payload.status || payload.phase;
+        const stateHint = payload.state || payload.status || payload.agentState || payload.subagentRunState || payload.phase;
         const terminalUpdate = sessionLooksTerminal(payload);
-        if (sessionLooksActive(payload)) {
+        const activeUpdate = sessionLooksActive(payload);
+        if (activeUpdate) {
           hydrateActiveSessionRun(stateHint);
         }
         if (terminalUpdate) {
           finishHydratedSessionRun(stateHint);
         }
-        if (msg.event === 'session.message' || terminalUpdate) {
+        const shouldRecoverFromMessage = msg.event === 'session.message'
+          && !activeUpdate
+          && !isGeneratingRef.current
+          && !activeRunIdRef.current;
+        if (terminalUpdate || shouldRecoverFromMessage) {
           triggerRecoveryOnce('reconnect');
         }
       }

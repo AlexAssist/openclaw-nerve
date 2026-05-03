@@ -28,8 +28,25 @@ function lowerString(value: unknown): string {
 
 type SessionSnapshotLike = Partial<Session & EventPayload>;
 
+function snapshotHasExplicitActiveRun(snapshot: SessionSnapshotLike): boolean {
+  return snapshot.hasActiveRun === true
+    || snapshot.hasActiveSubagentRun === true
+    || snapshot.busy === true
+    || snapshot.processing === true;
+}
+
+function snapshotHasExplicitInactiveRun(snapshot: SessionSnapshotLike): boolean {
+  return snapshot.hasActiveRun === false
+    || snapshot.busy === false
+    || snapshot.processing === false;
+}
+
 function sessionSnapshotIsActive(session: SessionSnapshotLike): boolean {
-  if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
+  const phase = lowerString(session.phase);
+  if (phase === 'end' || phase === 'error') return false;
+  if (snapshotHasExplicitActiveRun(session)) return true;
+  if (snapshotHasExplicitInactiveRun(session)) return false;
+  if (phase === 'start') return true;
   return [session.state, session.status, session.agentState, session.subagentRunState]
     .map(lowerString)
     .some((state) => BUSY_STATES.has(state));
@@ -38,6 +55,8 @@ function sessionSnapshotIsActive(session: SessionSnapshotLike): boolean {
 function sessionSnapshotIsTerminal(snapshot: SessionSnapshotLike): boolean {
   const phase = lowerString(snapshot.phase);
   if (phase === 'end' || phase === 'error') return true;
+  if (snapshotHasExplicitActiveRun(snapshot)) return false;
+  if (snapshotHasExplicitInactiveRun(snapshot)) return true;
   return [snapshot.state, snapshot.status, snapshot.agentState, snapshot.subagentRunState]
     .map(lowerString)
     .some((state) => IDLE_STATES.has(state));
@@ -45,9 +64,16 @@ function sessionSnapshotIsTerminal(snapshot: SessionSnapshotLike): boolean {
 
 function terminalAgentStatus(snapshot: SessionSnapshotLike): GranularAgentState['status'] {
   const phase = lowerString(snapshot.phase);
-  const state = lowerString(snapshot.status || snapshot.state || snapshot.agentState || snapshot.subagentRunState);
-  if (phase === 'error' || state === 'error' || state === 'failed' || state === 'timeout') return 'ERROR';
-  if (state === 'idle' || state === 'aborted' || state === 'cancelled' || state === 'killed' || state === 'stopped') return 'IDLE';
+  const states = [
+    snapshot.status,
+    snapshot.state,
+    snapshot.agentState,
+    snapshot.subagentRunState,
+  ].map(lowerString);
+  if (phase === 'error' || states.some((state) => state === 'error' || state === 'failed' || state === 'timeout')) return 'ERROR';
+  if (states.some((state) => state === 'idle' || state === 'aborted' || state === 'cancelled' || state === 'killed' || state === 'stopped')) return 'IDLE';
+  if (states.some((state) => state === 'done' || state === 'final' || state === 'completed' || state === 'finished' || state === 'ended')) return 'DONE';
+  if (snapshotHasExplicitInactiveRun(snapshot)) return 'IDLE';
   return 'DONE';
 }
 
@@ -721,7 +747,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Extract session updates (state + token data) from gateway payloads.
   const extractSessionUpdates = useCallback((state: string | undefined, payload: Partial<EventPayload>): Partial<Session> => {
     const updates: Partial<Session> = {};
+    const phase = lowerString(payload.phase);
     if (state) updates.state = state;
+    if (typeof payload.phase === 'string') updates.phase = payload.phase;
     if (typeof payload.status === 'string') updates.status = payload.status;
     if (typeof payload.agentState === 'string') updates.agentState = payload.agentState;
     if (typeof payload.hasActiveRun === 'boolean') updates.hasActiveRun = payload.hasActiveRun;
@@ -733,8 +761,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if ('totalTokens' in payload && typeof payload.totalTokens === 'number') updates.totalTokens = payload.totalTokens;
     if ('contextTokens' in payload && typeof payload.contextTokens === 'number') updates.contextTokens = payload.contextTokens;
 
-    const phase = lowerString(payload.phase);
-    if (phase === 'start') updates.hasActiveRun = true;
+    if (phase === 'start') {
+      updates.hasActiveRun = true;
+      // A lifecycle start may be phase-only. Clear stale terminal strings so
+      // cached snapshots don't look ended until the next full refresh arrives.
+      if (!state) updates.state = 'running';
+      if (typeof payload.status !== 'string') updates.status = 'running';
+    }
     if (phase === 'end' || phase === 'error') updates.hasActiveRun = false;
     if (sessionSnapshotIsTerminal(payload)) updates.hasActiveRun = false;
 
@@ -774,7 +807,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if ((evt === 'sessions.changed' || evt === 'session.message') && p.sessionKey) {
         const sk = p.sessionKey;
         const phase = lowerString(p.phase);
-        const state = lowerString(p.state || p.status);
+        const state = [p.state, p.status, p.agentState, p.subagentRunState].map(lowerString).find(Boolean) || '';
 
         const terminal = sessionSnapshotIsTerminal(p);
         if (!terminal && (phase === 'start' || sessionSnapshotIsActive(p))) {
@@ -813,8 +846,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // Handle lifecycle events from CLI agents (Codex, Claude Code CLI)
         if (isAgentLike) {
           const ap = typedPayload as AgentEventPayload;
+          const stream = evt === 'session.tool' ? (ap.stream || 'tool') : ap.stream;
 
-          if (ap.stream === 'lifecycle') {
+          if (stream === 'lifecycle') {
             const phase = (ap.data as Record<string, unknown> | undefined)?.phase;
             if (phase === 'start') {
               setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
@@ -834,7 +868,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
               }
               refreshSessions();
             }
-          } else if (ap.stream === 'tool' && ap.data) {
+          } else if (stream === 'tool' && ap.data) {
             if (ap.data.phase === 'start' && ap.data.name) {
               const toolDesc = describeToolUse(ap.data.name, ap.data.args || {});
               setGranularStatus(sk, {
@@ -846,7 +880,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             } else if (ap.data.phase === 'result') {
               setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
             }
-          } else if (ap.stream === 'assistant') {
+          } else if (stream === 'assistant') {
             setGranularStatus(sk, { status: 'STREAMING', since: Date.now() });
           }
         }
@@ -889,20 +923,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           : lowerString((typedPayload as ChatEventPayload).state || (typedPayload as ChatEventPayload).status || '');
 
         // Map legacy state strings to granular status (only if not already handled above)
-        if (isAgentLike && !(typedPayload as AgentEventPayload).stream) {
+        if (isAgentLike && !(evt === 'session.tool' ? 'tool' : (typedPayload as AgentEventPayload).stream)) {
           if (BUSY_STATES.has(state)) {
             setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
           } else if (IDLE_STATES.has(state)) {
-            if (state === 'error') {
-              setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
-            } else if (state === 'aborted') {
-              setGranularStatus(sk, { status: 'IDLE', since: Date.now() });
-            } else {
-              setGranularStatus(sk, { status: 'DONE', since: Date.now() });
+            const nextStatus = terminalAgentStatus({ state });
+            setGranularStatus(sk, { status: nextStatus, since: Date.now() });
+            if (isTopLevelAgentSessionKey(sk) && nextStatus !== 'IDLE') {
+              markSessionUnread(sk);
+              pingSession(sk);
             }
-            if (state === 'final' || state === 'done' || state === 'completed') {
-              refreshSessions();
-            }
+            refreshSessions();
+            if (nextStatus === 'DONE') scheduleDelayedRefresh();
           }
         }
 

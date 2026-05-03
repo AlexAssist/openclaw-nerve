@@ -165,6 +165,54 @@ describe('ChatContext subscription stability', () => {
     });
   });
 
+  it('does not hydrate the selected chat from child-only active run snapshots', async () => {
+    const { ChatProvider, useChat, rpcMock } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: false, hasActiveSubagentRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return <div data-testid="is-generating">{String(chat.isGenerating)}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('sessions.messages.subscribe', { key: 'main' });
+    });
+    expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    expect(rpcMock).not.toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
+  });
+
+  it('does not hydrate from stale running text when explicit own run flag is inactive', async () => {
+    const { ChatProvider, useChat, rpcMock } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: false, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return <div data-testid="is-generating">{String(chat.isGenerating)}</div>;
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('sessions.messages.subscribe', { key: 'main' });
+    });
+    expect(screen.getByTestId('is-generating').textContent).toBe('false');
+    expect(rpcMock).not.toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
+  });
+
   it('clears hydrated generation state from a terminal refreshed session snapshot', async () => {
     const { ChatProvider, useChat, setSessions, rpcMock } = await setup({
       connectionState: 'connected',
