@@ -90,6 +90,21 @@ describe('classifyStreamEvent', () => {
       expect(classifyStreamEvent(event)?.type).toBe('agent_tool_result');
     });
 
+    it('normalizes subscribed session.tool events as agent tool events', () => {
+      const event: GatewayEvent = {
+        type: 'event', event: 'session.tool',
+        payload: {
+          sessionKey: 'main',
+          stream: 'tool',
+          data: { phase: 'start', name: 'read', toolCallId: 'tc-1' },
+        },
+      };
+      const result = classifyStreamEvent(event);
+      expect(result?.source).toBe('agent');
+      expect(result?.sessionKey).toBe('main');
+      expect(result?.type).toBe('agent_tool_start');
+    });
+
     it('ignores tool events without required fields', () => {
       const event: GatewayEvent = {
         type: 'event', event: 'agent',

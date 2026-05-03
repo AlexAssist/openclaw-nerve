@@ -20,7 +20,15 @@ export interface Session {
   agentState?: string;
   busy?: boolean;
   processing?: boolean;
+  /** True when the gateway knows this session currently owns an active run. */
+  hasActiveRun?: boolean;
+  /** True when the gateway knows a child/subagent run is active for this session. */
+  hasActiveSubagentRun?: boolean;
+  subagentRunState?: string;
   status?: string;
+  startedAt?: number;
+  endedAt?: number;
+  runtimeMs?: number;
   lastActivity?: string | number;
   updatedAt?: number;
   abortedLastRun?: boolean;
@@ -181,6 +189,8 @@ export type GatewayMessage = GatewayEvent | GatewayRequest | GatewayResponse;
 export interface EventPayload {
   sessionKey?: string;
   state?: string;
+  status?: string;
+  phase?: string;
   agentState?: string;
   runId?: string;
   seq?: number;
@@ -191,6 +201,15 @@ export interface EventPayload {
   error?: string;
   errorMessage?: string;
   stopReason?: string;
+  hasActiveRun?: boolean;
+  hasActiveSubagentRun?: boolean;
+  subagentRunState?: string;
+  updatedAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+  runtimeMs?: number;
+  totalTokens?: number;
+  contextTokens?: number;
 }
 
 // ─── Typed event payloads ────────────────────────────────────────────
@@ -199,6 +218,8 @@ export interface EventPayload {
 export interface ChatEventPayload {
   sessionKey?: string;
   state?: string;
+  status?: string;
+  phase?: string;
   runId?: string;
   seq?: number;
   message?: ChatMessage | string;
@@ -207,12 +228,19 @@ export interface ChatEventPayload {
   error?: string;
   errorMessage?: string;
   stopReason?: string;
+  hasActiveRun?: boolean;
+  updatedAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+  runtimeMs?: number;
 }
 
 /** Payload for 'agent' events (state changes + tool streaming) */
 export interface AgentEventPayload {
   sessionKey?: string;
   state?: string;
+  status?: string;
+  phase?: string;
   agentState?: string;
   /** Present when stream === 'tool' */
   stream?: string;
@@ -220,6 +248,11 @@ export interface AgentEventPayload {
   data?: AgentToolStreamData;
   totalTokens?: number;
   contextTokens?: number;
+  hasActiveRun?: boolean;
+  updatedAt?: number;
+  startedAt?: number;
+  endedAt?: number;
+  runtimeMs?: number;
 }
 
 /** Data within an agent tool-stream event */

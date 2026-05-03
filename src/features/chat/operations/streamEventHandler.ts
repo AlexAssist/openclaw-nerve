@@ -44,7 +44,7 @@ export type StreamEventType =
 
 export interface ClassifiedEvent {
   type: StreamEventType;
-  /** Original gateway event type ('agent' | 'chat') */
+  /** Original gateway event type ('agent' | 'chat'); session.tool is normalized as agent. */
   source: 'agent' | 'chat';
   /** Session key from the payload */
   sessionKey?: string;
@@ -67,7 +67,7 @@ export interface ClassifiedEvent {
 export function classifyStreamEvent(event: GatewayEvent): ClassifiedEvent | null {
   const evt = event.event;
 
-  if (evt === 'agent') {
+  if (evt === 'agent' || evt === 'session.tool') {
     const ap = (event.payload || {}) as AgentEventPayload;
     const runId = typeof (ap as { runId?: unknown }).runId === 'string'
       ? (ap as { runId: string }).runId

@@ -19,8 +19,23 @@ import {
   getRootAgentId,
 } from '@/features/sessions/sessionKeys';
 
-const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'started']);
-const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed']);
+const BUSY_STATES = new Set(['running', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
+const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+
+function lowerString(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function sessionSnapshotIsActive(session: Partial<Session>): boolean {
+  if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
+  return [session.state, session.status, session.agentState, session.subagentRunState]
+    .map(lowerString)
+    .some((state) => BUSY_STATES.has(state));
+}
+
+function sessionPayloadIsTerminal(payload: Partial<EventPayload>): boolean {
+  return [payload.state, payload.status].map(lowerString).some((state) => IDLE_STATES.has(state));
+}
 
 // Use the full session list for the sidebar so older root chats stay visible.
 const FULL_SESSIONS_LIMIT = 1000;
@@ -578,6 +593,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           // Compare relevant fields to detect changes
           const changed = (
             existing.state !== newSession.state ||
+            existing.status !== newSession.status ||
+            existing.agentState !== newSession.agentState ||
+            existing.hasActiveRun !== newSession.hasActiveRun ||
+            existing.hasActiveSubagentRun !== newSession.hasActiveSubagentRun ||
+            existing.subagentRunState !== newSession.subagentRunState ||
+            existing.startedAt !== newSession.startedAt ||
+            existing.endedAt !== newSession.endedAt ||
+            existing.runtimeMs !== newSession.runtimeMs ||
             existing.totalTokens !== newSession.totalTokens ||
             existing.contextTokens !== newSession.contextTokens ||
             existing.model !== newSession.model ||
@@ -601,13 +624,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // If nothing changed, return the same array reference
         return hasChanges ? merged : prev;
       });
+
+      for (const session of newSessions) {
+        const key = getSessionKey(session);
+        if (!key || !sessionSnapshotIsActive(session)) continue;
+        const stage = lowerString(session.state || session.status || session.agentState || session.subagentRunState);
+        setGranularStatus(key, {
+          status: stage === 'delta' || stage === 'streaming' ? 'STREAMING' : 'THINKING',
+          since: Date.now(),
+        });
+      }
+
       setCurrentSession(nextCurrentSession);
     } catch (err) {
       console.debug('[SessionContext] Failed to refresh sessions:', err);
     } finally {
       setSessionsLoading(false);
     }
-  }, [connectionState, listAuthoritativeSessions, setCurrentSession]);
+  }, [connectionState, listAuthoritativeSessions, setCurrentSession, setGranularStatus]);
 
   const refreshSessionsRef = useRef(refreshSessions);
   useEffect(() => {
@@ -644,12 +678,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Extract session updates (state + token data) from a typed agent event payload
-  const extractSessionUpdates = useCallback((state: string | undefined, payload: AgentEventPayload | ChatEventPayload): Partial<Session> => {
+  // Extract session updates (state + token data) from gateway payloads.
+  const extractSessionUpdates = useCallback((state: string | undefined, payload: Partial<EventPayload>): Partial<Session> => {
     const updates: Partial<Session> = {};
     if (state) updates.state = state;
+    if (typeof payload.status === 'string') updates.status = payload.status;
+    if (typeof payload.agentState === 'string') updates.agentState = payload.agentState;
+    if (typeof payload.hasActiveRun === 'boolean') updates.hasActiveRun = payload.hasActiveRun;
+    if (typeof payload.hasActiveSubagentRun === 'boolean') updates.hasActiveSubagentRun = payload.hasActiveSubagentRun;
+    if (typeof payload.subagentRunState === 'string') updates.subagentRunState = payload.subagentRunState;
+    if (typeof payload.startedAt === 'number') updates.startedAt = payload.startedAt;
+    if (typeof payload.endedAt === 'number') updates.endedAt = payload.endedAt;
+    if (typeof payload.runtimeMs === 'number') updates.runtimeMs = payload.runtimeMs;
     if ('totalTokens' in payload && typeof payload.totalTokens === 'number') updates.totalTokens = payload.totalTokens;
     if ('contextTokens' in payload && typeof payload.contextTokens === 'number') updates.contextTokens = payload.contextTokens;
+
+    const phase = lowerString(payload.phase);
+    if (phase === 'start') updates.hasActiveRun = true;
+    if (phase === 'end' || phase === 'error') updates.hasActiveRun = false;
+    if (sessionPayloadIsTerminal(payload)) updates.hasActiveRun = false;
+
     return updates;
   }, []);
 
@@ -663,6 +711,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, 1500);
   }, []);
 
+  // Ask OpenClaw for targeted session lifecycle/tool broadcasts on this connection.
+  useEffect(() => {
+    if (connectionState !== 'connected') return;
+    void rpc('sessions.subscribe', {}).catch((err) => {
+      console.debug('[SessionContext] sessions.subscribe unavailable:', err);
+    });
+    return () => {
+      void rpc('sessions.unsubscribe', {}).catch(() => {});
+    };
+  }, [connectionState, rpc]);
+
   // Subscribe to gateway events for granular status tracking + session state sync + agent log + event log
   useEffect(() => {
     const unsub = subscribe((msg: GatewayEvent) => {
@@ -671,15 +730,53 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
       addEvent(msg);
 
-      // Session granular status tracking + state sync from agent/chat events
-      if ((evt === 'agent' || evt === 'chat') && p.sessionKey) {
+      // Session snapshot events are only delivered after sessions.subscribe().
+      if ((evt === 'sessions.changed' || evt === 'session.message') && p.sessionKey) {
         const sk = p.sessionKey;
-        const typedPayload = evt === 'agent'
+        const phase = lowerString(p.phase);
+        const state = lowerString(p.state || p.status);
+
+        if (phase === 'start' || sessionSnapshotIsActive(p)) {
+          setGranularStatus(sk, {
+            status: state === 'delta' || state === 'streaming' ? 'STREAMING' : 'THINKING',
+            since: Date.now(),
+          });
+          if (isTopLevelAgentSessionKey(sk)) markSessionUnread(sk);
+        } else if (phase === 'end' || state === 'done' || state === 'final' || state === 'completed') {
+          setGranularStatus(sk, { status: 'DONE', since: Date.now() });
+          if (isTopLevelAgentSessionKey(sk)) {
+            markSessionUnread(sk);
+            pingSession(sk);
+          }
+          refreshSessions();
+          scheduleDelayedRefresh();
+        } else if (phase === 'error' || state === 'error') {
+          setGranularStatus(sk, { status: 'ERROR', since: Date.now() });
+          if (isTopLevelAgentSessionKey(sk)) {
+            markSessionUnread(sk);
+            pingSession(sk);
+          }
+          refreshSessions();
+        }
+
+        const updates = extractSessionUpdates(p.state || p.status, p);
+        if (Object.keys(updates).length > 0) {
+          updateSessionFromEvent(sk, updates);
+        }
+      }
+
+      // Session granular status tracking + state sync from agent/chat events.
+      // session.tool is delivered only to sessions.subscribe() subscribers and
+      // rehydrates tool activity for a page that joined after the run started.
+      if ((evt === 'agent' || evt === 'session.tool' || evt === 'chat') && p.sessionKey) {
+        const sk = p.sessionKey;
+        const isAgentLike = evt === 'agent' || evt === 'session.tool';
+        const typedPayload = isAgentLike
           ? (msg.payload || {}) as AgentEventPayload
           : (msg.payload || {}) as ChatEventPayload;
 
         // Handle lifecycle events from CLI agents (Codex, Claude Code CLI)
-        if (evt === 'agent') {
+        if (isAgentLike) {
           const ap = typedPayload as AgentEventPayload;
 
           if (ap.stream === 'lifecycle') {
@@ -752,12 +849,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
 
         // Also handle legacy state strings for backward compatibility
-        const state = evt === 'agent'
-          ? ((typedPayload as AgentEventPayload).state || (typedPayload as AgentEventPayload).agentState || '')
-          : ((typedPayload as ChatEventPayload).state || '');
+        const state = isAgentLike
+          ? lowerString((typedPayload as AgentEventPayload).state || (typedPayload as AgentEventPayload).agentState || (typedPayload as AgentEventPayload).status || '')
+          : lowerString((typedPayload as ChatEventPayload).state || (typedPayload as ChatEventPayload).status || '');
 
         // Map legacy state strings to granular status (only if not already handled above)
-        if (evt === 'agent' && !(typedPayload as AgentEventPayload).stream) {
+        if (isAgentLike && !(typedPayload as AgentEventPayload).stream) {
           if (BUSY_STATES.has(state)) {
             setGranularStatus(sk, { status: 'THINKING', since: Date.now() });
           } else if (IDLE_STATES.has(state)) {

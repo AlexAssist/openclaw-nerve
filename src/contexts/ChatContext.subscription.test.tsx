@@ -1,8 +1,9 @@
-/** Regression test: ChatContext should not resubscribe on local state updates. */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act, waitFor } from '@testing-library/react';
+/** Regression tests for ChatContext realtime subscriptions. */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, act, waitFor, screen } from '@testing-library/react';
 import { useEffect } from 'react';
 import type { ImageAttachment } from '@/features/chat/types';
+import type { GatewayEvent, Session } from '@/types';
 
 describe('ChatContext subscription stability', () => {
   beforeEach(() => {
@@ -10,16 +11,29 @@ describe('ChatContext subscription stability', () => {
     vi.clearAllMocks();
   });
 
-  async function setup() {
-    const subscribeMock = vi.fn(() => () => {});
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function setup(options: {
+    connectionState?: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+    currentSession?: string;
+    sessions?: Session[];
+  } = {}) {
+    const subscribedHandlers: Array<(msg: GatewayEvent) => void> = [];
+    const subscribeMock = vi.fn((handler: (msg: GatewayEvent) => void) => {
+      subscribedHandlers.push(handler);
+      return () => {};
+    });
     const rpcMock = vi.fn(async (method: string) => {
       if (method === 'chat.send') return { runId: 'run-1', status: 'started' };
+      if (method === 'chat.history') return { messages: [] };
       return {};
     });
 
     vi.doMock('./GatewayContext', () => ({
       useGateway: () => ({
-        connectionState: 'disconnected',
+        connectionState: options.connectionState || 'disconnected',
         rpc: rpcMock,
         subscribe: subscribeMock,
       }),
@@ -27,8 +41,8 @@ describe('ChatContext subscription stability', () => {
 
     vi.doMock('./SessionContext', () => ({
       useSessionContext: () => ({
-        currentSession: 'main',
-        sessions: [],
+        currentSession: options.currentSession || 'main',
+        sessions: options.sessions || [],
       }),
     }));
 
@@ -40,7 +54,7 @@ describe('ChatContext subscription stability', () => {
     }));
 
     const mod = await import('./ChatContext');
-    return { ...mod, subscribeMock };
+    return { ...mod, rpcMock, subscribeMock, subscribedHandlers };
   }
 
   it('keeps a single subscribe registration after handleSend-triggered rerender', async () => {
@@ -71,5 +85,92 @@ describe('ChatContext subscription stability', () => {
 
     // Regression assertion: local state updates should not cause resubscription churn.
     expect(subscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('subscribes to current session message broadcasts while connected and cleans up', async () => {
+    const { ChatProvider, rpcMock } = await setup({ connectionState: 'connected' });
+
+    const { unmount } = render(
+      <ChatProvider>
+        <div />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('sessions.messages.subscribe', { key: 'main' });
+    });
+
+    unmount();
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('sessions.messages.unsubscribe', { key: 'main' });
+    });
+  });
+
+  it('hydrates active generation state from a refreshed session snapshot', async () => {
+    const { ChatProvider, useChat, rpcMock } = await setup({
+      connectionState: 'connected',
+      sessions: [{ sessionKey: 'main', hasActiveRun: true, status: 'running' }],
+    });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('thinking');
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('chat.history', { sessionKey: 'main', limit: 120 });
+    });
+  });
+
+  it('hydrates active generation state from a subscribed lifecycle event after refresh', async () => {
+    const { ChatProvider, useChat, subscribedHandlers } = await setup({ connectionState: 'connected' });
+
+    function Consumer() {
+      const chat = useChat();
+      return (
+        <div>
+          <div data-testid="is-generating">{String(chat.isGenerating)}</div>
+          <div data-testid="processing-stage">{chat.processingStage || 'NONE'}</div>
+        </div>
+      );
+    }
+
+    render(
+      <ChatProvider>
+        <Consumer />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(subscribedHandlers.length).toBe(1));
+
+    act(() => {
+      subscribedHandlers[0]({
+        type: 'event',
+        event: 'sessions.changed',
+        payload: { sessionKey: 'main', phase: 'start' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-generating').textContent).toBe('true');
+    });
+    expect(screen.getByTestId('processing-stage').textContent).toBe('thinking');
   });
 });

@@ -145,6 +145,48 @@ describe('SessionContext', () => {
     }) as typeof fetch;
   });
 
+  it('subscribes to gateway session events while connected and cleans up', async () => {
+    const { unmount } = render(
+      <SessionProvider>
+        <SessionLabels />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('sessions.subscribe', {});
+    });
+
+    unmount();
+
+    await waitFor(() => {
+      expect(rpcMock).toHaveBeenCalledWith('sessions.unsubscribe', {});
+    });
+  });
+
+  it('hydrates active run status from sessions.list snapshots', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'sessions.list') {
+        return {
+          sessions: [
+            { sessionKey: 'agent:main:main', label: 'Main' },
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer', hasActiveRun: true, status: 'running' },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(
+      <SessionProvider>
+        <SessionStatusProbe />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('reviewer-status').textContent).toBe('THINKING');
+    });
+  });
+
   it('calls agents.create when spawning a root agent', async () => {
     function Spawn() {
       const { spawnSession } = useSessionContext();

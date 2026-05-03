@@ -18,7 +18,7 @@ import { createContext, useContext, useCallback, useRef, useEffect, useState, us
 import { useGateway } from './GatewayContext';
 import { useSessionContext } from './SessionContext';
 import { useSettings } from './SettingsContext';
-import { getSessionKey, type GatewayEvent } from '@/types';
+import { getSessionKey, type EventPayload, type GatewayEvent, type Session } from '@/types';
 import {
   getRootAgentSessionKey,
   isRootChildSession,
@@ -98,6 +98,27 @@ interface ChatContextValue {
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
+
+const ACTIVE_SESSION_STATES = new Set(['running', 'thinking', 'processing', 'streaming', 'tool_use', 'executing', 'tool', 'delta', 'started', 'active']);
+const TERMINAL_SESSION_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'completed', 'finished', 'ended', 'cancelled', 'timeout', 'stopped']);
+
+function lowerString(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function sessionLooksActive(session?: Partial<Session & EventPayload> | null): boolean {
+  if (!session) return false;
+  if (session.hasActiveRun || session.hasActiveSubagentRun || session.busy || session.processing) return true;
+  if (lowerString(session.phase) === 'start') return true;
+  return [session.state, session.status, session.agentState, session.subagentRunState]
+    .map(lowerString)
+    .some((state) => ACTIVE_SESSION_STATES.has(state));
+}
+
+function sessionLooksTerminal(session?: Partial<EventPayload> | Partial<Session> | null): boolean {
+  if (!session) return false;
+  return [session.state, session.status].map(lowerString).some((state) => TERMINAL_SESSION_STATES.has(state));
+}
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const { connectionState, rpc, subscribe } = useGateway();
@@ -179,6 +200,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleFinalTTS,
   } = ttsHook;
 
+  const currentSessionMeta = useMemo(
+    () => sessions.find((session) => getSessionKey(session) === currentSession) || null,
+    [currentSession, sessions],
+  );
+
+  const hydrateActiveSessionRun = useCallback((stateHint?: string) => {
+    if (!currentSessionRef.current) return;
+    if (isGeneratingRef.current || activeRunIdRef.current) return;
+
+    const state = lowerString(stateHint);
+    isGeneratingRef.current = true;
+    setIsGenerating(true);
+    resetPlayedSounds();
+    setProcessingStage(
+      state === 'delta' || state === 'streaming'
+        ? 'streaming'
+        : (state === 'tool' || state === 'tool_use' || state === 'executing' ? 'tool_use' : 'thinking'),
+    );
+    setLastEventTimestamp(Date.now());
+    triggerRecovery('reconnect');
+  }, [resetPlayedSounds, setLastEventTimestamp, setProcessingStage, triggerRecovery]);
+
   // ─── Reset transient state on session switch ──────────────────────────────
   useEffect(() => {
     setIsGenerating(false);
@@ -225,6 +268,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (connectionState !== 'connected' || !currentSession) return;
     loadHistory(currentSession);
   }, [connectionState, currentSession, loadHistory]);
+
+  // Request transcript/message broadcasts for the currently viewed session.
+  useEffect(() => {
+    if (connectionState !== 'connected' || !currentSession) return;
+    const key = currentSession;
+    void rpc('sessions.messages.subscribe', { key }).catch((err) => {
+      console.debug('[ChatContext] sessions.messages.subscribe unavailable:', err);
+    });
+    return () => {
+      void rpc('sessions.messages.unsubscribe', { key }).catch(() => {});
+    };
+  }, [connectionState, currentSession, rpc]);
+
+  // A page refresh loses the in-memory chat_started event. Hydrate from the
+  // gateway's session snapshot so the UI rejoins the active run instead of
+  // looking idle until the final transcript lands.
+  useEffect(() => {
+    if (connectionState !== 'connected' || !currentSession) return;
+    if (!sessionLooksActive(currentSessionMeta)) return;
+    hydrateActiveSessionRun(
+      currentSessionMeta?.state || currentSessionMeta?.status || currentSessionMeta?.agentState || currentSessionMeta?.subagentRunState,
+    );
+  }, [connectionState, currentSession, currentSessionMeta, hydrateActiveSessionRun]);
 
   // ─── Periodic history poll for sub-agent sessions ─────────────────────────
   const isSubagentSession = currentSession ? isSubagentSessionKey(currentSession) : false;
@@ -294,10 +360,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         triggerRecovery(reason);
       };
 
+      const currentSk = currentSessionRef.current;
+      const payload = (msg.payload || {}) as EventPayload;
+
+      if ((msg.event === 'sessions.changed' || msg.event === 'session.message') && payload.sessionKey === currentSk) {
+        const stateHint = payload.state || payload.status || payload.phase;
+        if (sessionLooksActive(payload)) {
+          hydrateActiveSessionRun(stateHint);
+        }
+        if (msg.event === 'session.message' || sessionLooksTerminal(payload)) {
+          triggerRecoveryOnce('reconnect');
+        }
+      }
+
       const classified = classifyStreamEvent(msg);
       if (!classified) return;
-
-      const currentSk = currentSessionRef.current;
       if (classified.sessionKey !== currentSk) {
         if (
           isTopLevelAgentSessionKey(currentSk) &&
@@ -585,6 +662,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     playCompletionPing,
     resetPlayedSounds,
     handleFinalTTS,
+    hydrateActiveSessionRun,
     subscribe,
     rpc,
   ]);
