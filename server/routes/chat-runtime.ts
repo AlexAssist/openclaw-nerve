@@ -174,6 +174,13 @@ app.get('/api/chat-runtime/stream', async (c) => {
       const queuedLivePatches: TimelinePatch[] = [];
       let forwardLivePatches = false;
 
+      // Invariant: `connected` is already false if the client aborted during
+      // hydrateSession (single-threaded JS, the check at line above catches
+      // it). This second guard is belt-and-suspenders so that any future
+      // refactor that introduces a real async step between the hydration
+      // await and the subscribe call (e.g. an awaited pre-subscribe RPC)
+      // cannot silently attach a listener that disconnect() already tore down.
+      if (!connected) return;
       unsubscribe = runtime.subscribe(sessionKey, (patch) => {
         if (forwardLivePatches) {
           enqueueJsonEvent('patch', patch);
@@ -266,6 +273,11 @@ app.post('/api/chat-runtime/sessions/:sessionKey/messages', async (c) => {
     ...(images.length > 0 ? { images } : {}),
     ...(uploadAttachments?.length ? { uploadAttachments } : {}),
   };
+  // Apply the optimistic user bubble, then bind to the real runId when chat.send returns
+  // (see `bindRunIdToOptimisticUserMessage` below). The store dedupes by idempotencyKey,
+  // so the bind step updates the existing message in place. The alternate "call
+  // applyOptimisticUserMessage twice with the same idempotencyKey" path is pinned by
+  // server/lib/chat-runtime/store.test.ts 'dedupes a second applyOptimisticUserMessage'.
   const optimisticPatch = runtime.applyOptimisticUserMessage(optimisticInput);
 
   try {
@@ -379,11 +391,11 @@ function snapshotBaseline(snapshot: TimelineSnapshot): CatchupBaseline {
   };
 }
 
-function isPatchCoveredByBaseline(patch: TimelinePatch, coveredCursor: string | undefined): boolean {
+export function isPatchCoveredByBaseline(patch: TimelinePatch, coveredCursor: string | undefined): boolean {
   return coveredCursor !== undefined && compareCursor(patch.cursor, coveredCursor) <= 0;
 }
 
-function compareCursor(left: string, right: string): number {
+export function compareCursor(left: string, right: string): number {
   const leftNumber = Number(left);
   const rightNumber = Number(right);
   if (
@@ -395,7 +407,12 @@ function compareCursor(left: string, right: string): number {
     return leftNumber - rightNumber;
   }
 
-  return left === right ? 0 : 1;
+  // Non-numeric or out-of-safe-int cursors are treated as "covered" (0).
+  // The cursor contract is stringified safe-integer monotonic — anything
+  // else is treated conservatively: drop the patch rather than risk
+  // re-delivering a stale one. Throwing here would tear down the SSE
+  // handler, which is worse than dropping a single patch.
+  return 0;
 }
 
 function errorMessage(err: unknown): string {

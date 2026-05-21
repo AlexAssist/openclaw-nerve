@@ -304,6 +304,25 @@ describe('ChatTimelineStore', () => {
     const snapshot = store.snapshot(sessionKey, 'manual');
     expect(snapshot.timeline.hydrationState).toBe('ready');
   });
+
+  it('logs and removes a subscriber that throws', () => {
+    const store = new ChatTimelineStore({ maxPatchesPerSession: 16 });
+    const sessionKey = 'agent:main:main';
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const thrower = vi.fn(() => { throw new Error('subscriber boom'); });
+
+    store.subscribe(sessionKey, thrower);
+    store.applyEvents([
+      { type: 'turn_started', sessionKey, runId: 'run-1', at: 1000 },
+    ]);
+
+    expect(thrower).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalled();
+    const message = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(message.toLowerCase()).toMatch(/subscriber|chat-runtime/);
+
+    errorSpy.mockRestore();
+  });
 });
 
 describe('ChatRuntime', () => {
@@ -1684,6 +1703,42 @@ describe('ChatRuntime', () => {
         sessionKey: 'agent:delegated:main',
         items: expect.any(Object),
       },
+    });
+  });
+
+  it('dedupes a second applyOptimisticUserMessage with the same idempotencyKey when rebinding to a runId', () => {
+    // The chat-runtime route calls applyOptimisticUserMessage twice with the same idempotencyKey:
+    // once before chat.send (no runId) to seed the optimistic bubble, and once after chat.send
+    // returns to rebind the message to the real runId. The reducer dedupes by idempotencyKey —
+    // the second call updates the existing item in place rather than creating a duplicate.
+    const runtime = new ChatRuntime({
+      maxPatchesPerSession: 16,
+      rpc: async () => ({ messages: [] }),
+    });
+    const sessionKey = 'agent:main:main';
+
+    runtime.applyOptimisticUserMessage({
+      sessionKey,
+      text: 'hello',
+      idempotencyKey: 'idem-1',
+      at: 1000,
+    });
+    runtime.applyOptimisticUserMessage({
+      sessionKey,
+      text: 'hello',
+      idempotencyKey: 'idem-1',
+      runId: 'run-1',
+      at: 1001,
+    });
+
+    const snapshot = runtime.snapshot(sessionKey, 'live');
+    const userMessages = Object.values(snapshot.timeline.items).filter((item) => item.kind === 'user_message');
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]).toMatchObject({
+      kind: 'user_message',
+      text: 'hello',
+      idempotencyKey: 'idem-1',
+      runId: 'run-1',
     });
   });
 });
