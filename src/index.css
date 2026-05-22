@@ -1284,6 +1284,25 @@
 .markdown-content h2 { @apply text-base; }
 .markdown-content h3 { @apply text-sm; }
 
+.markdown-content .katex,
+.markdown-content .katex-display,
+.markdown-document-content .katex,
+.markdown-document-content .katex-display {
+  color: inherit;
+}
+
+.markdown-content .katex-display,
+.markdown-document-content .katex-display {
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-content .katex-error,
+.markdown-document-content .katex-error {
+  color: color-mix(in srgb, var(--color-destructive) 80%, var(--color-foreground));
+}
+
 .markdown-document {
   backdrop-filter: blur(14px);
 }

@@ -876,4 +876,61 @@ describe('MarkdownRenderer', () => {
     const bq = document.querySelector('blockquote');
     expect(bq).toBeTruthy();
   });
+
+  describe('math rendering', () => {
+    it('renders inline math delimited by single dollars', () => {
+      render(<MarkdownRenderer content="The identity $x^2 + y^2 = z^2$ holds." />);
+      const katex = document.querySelector('.katex');
+      expect(katex).toBeTruthy();
+      expect(document.querySelector('.katex-display')).toBeNull();
+    });
+
+    it('renders block math delimited by double dollars on their own lines as a display equation', () => {
+      render(<MarkdownRenderer content={'Before\n\n$$\n\\int_0^1 x \\, dx\n$$\n\nAfter'} />);
+      const display = document.querySelector('.katex-display');
+      expect(display).toBeTruthy();
+      expect(display?.querySelector('.katex')).toBeTruthy();
+    });
+
+    it('renders the issue 312 example as typeset math', () => {
+      const { container } = render(
+        <MarkdownRenderer content={'The figure of merit $FoM = \\frac{S}{FWHM_n + FWHM_\\gamma}$ matters.'} />,
+      );
+      expect(container.querySelector('.katex')).toBeTruthy();
+      // KaTeX preserves the LaTeX source in the MathML annotation for screen readers;
+      // visual confirmation that the math was rendered comes from the .katex span above.
+      // The visual HTML output contains the typeset fraction characters (no backslash).
+      expect(container.querySelector('.katex-html')?.textContent ?? '').not.toContain('\\frac');
+    });
+
+    it('does not parse dollar signs inside fenced code blocks as math', () => {
+      render(<MarkdownRenderer content={'```python\nprice = $5\nother = $10\n```'} />);
+      const pre = document.querySelector('pre');
+      expect(pre).toBeTruthy();
+      expect(pre?.textContent).toContain('$5');
+      expect(pre?.textContent).toContain('$10');
+      expect(document.querySelector('.katex')).toBeNull();
+    });
+
+    it('does not parse dollar signs inside inline code as math', () => {
+      render(<MarkdownRenderer content="Use the `$variable` syntax for shell expansion" />);
+      const code = document.querySelector('code');
+      expect(code).toBeTruthy();
+      expect(code?.textContent).toBe('$variable');
+      expect(document.querySelector('.katex')).toBeNull();
+    });
+
+    it('does not throw on malformed LaTeX', () => {
+      expect(() =>
+        render(<MarkdownRenderer content="Try $\\frac{1$ now" />),
+      ).not.toThrow();
+    });
+
+    // remark-math v6 enables single-dollar inline math by default, which is required
+    // for the assistant output shown in issue #312 (e.g. `$FoM = ...$`). The known
+    // trade-off: prose containing balanced bare dollar signs (`$5 ... $10`) will be
+    // parsed as math. The disable knob is documented in the plan (D2 / Operational
+    // Notes); flip `singleDollarTextMath: false` in MarkdownRenderer.tsx if reports
+    // surface. We do not assert on that case here.
+  });
 });

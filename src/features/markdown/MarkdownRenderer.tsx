@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { hljs } from '@/lib/highlight';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { escapeRegex } from '@/lib/constants';
@@ -539,7 +541,8 @@ export function MarkdownRenderer({
   return (
     <div ref={containerRef} className={`markdown-content ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkStableHeadingIds]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkStableHeadingIds]}
+        rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false, trust: false }]]}
         urlTransform={(url) => transformMarkdownUrl(url, {
           currentDocumentPath,
           workspaceAgentId,
