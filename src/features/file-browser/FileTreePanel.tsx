@@ -11,7 +11,8 @@ import { FileTreeNode } from './FileTreeNode';
 import { buildFileTreeMenuActions } from './fileTreeMenuActions';
 import { useFileTree } from './hooks/useFileTree';
 import { useVaultTree } from './hooks/useVaultTree';
-import { useRootSwitcher } from './hooks/useRootSwitcher';
+import { useRootSwitcher, type FileTreeRoot } from './hooks/useRootSwitcher';
+import { FileTreeContext } from './hooks/useFileTreeContext';
 import { InlineSelect } from '@/components/ui/InlineSelect';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -128,6 +129,33 @@ export function FileTreePanel({
   // Call both hooks unconditionally (Rules of Hooks), pick based on selectedRoot at render time.
   const workspaceTree = useFileTree(workspaceAgentId, showHiddenWorkspaceEntries);
   const vaultTree = useVaultTree(showHiddenWorkspaceEntries);
+
+  // Fetch vaultRoot for the context
+  const [vaultRoot, setVaultRoot] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const req = fetch('/api/config/vaultRoot');
+      if (!req || typeof (req as unknown as { then?: unknown }).then !== 'function') return;
+      (req as Promise<Response>)
+        .then((res) => {
+          if (cancelled) return;
+          if (!res.ok) return;
+          return res.json().catch(() => null);
+        })
+        .then((data: { vaultRoot?: string } | null) => {
+          if (cancelled) return;
+          if (data?.vaultRoot) setVaultRoot(data.vaultRoot);
+        })
+        .catch(() => { /* ignore */ });
+    } catch {
+      /* ignore */
+    }
+    return () => { cancelled = true; };
+  }, []);
+
+  // Context value provided to descendants
+  const fileTreeContextValue = { selectedRoot, vaultRoot, vaultAvailable, setSelectedRoot };
 
   // Reset tree state when switching between workspace and vault modes
   useEffect(() => {
@@ -782,6 +810,7 @@ export function FileTreePanel({
     : [];
 
   return (
+    <FileTreeContext.Provider value={fileTreeContextValue}>
     <div
       ref={panelRef}
       className="relative flex h-full min-h-0 w-full shrink-0 flex-col overflow-visible"
@@ -809,7 +838,7 @@ export function FileTreePanel({
         >
           <InlineSelect
             value={selectedRoot}
-            onChange={setSelectedRoot}
+            onChange={(v) => setSelectedRoot(v as FileTreeRoot)}
             options={[
               { value: 'workspace', label: 'Workspace' },
               { value: 'vault', label: vaultAvailable ? 'Vault' : 'Vault ⚠' },
@@ -986,5 +1015,6 @@ export function FileTreePanel({
         />
       )}
     </div>
+    </FileTreeContext.Provider>
   );
 }

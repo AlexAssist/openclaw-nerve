@@ -141,7 +141,13 @@ describe('FileTreePanel', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    vi.stubGlobal('fetch', vi.fn());
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as { url?: string }).url ?? '';
+      if (url === '/api/config/vaultRoot') {
+        return { ok: true, json: async () => ({ vaultRoot: '' }), then: undefined } as unknown as Response;
+      }
+      throw new Error('Unexpected fetch call: ' + url);
+    }));
     // Use the statically imported mocked hook
     mockUseFileTree = vi.mocked(useFileTree);
 

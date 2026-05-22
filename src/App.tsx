@@ -40,6 +40,7 @@ import { PanelErrorBoundary } from '@/components/PanelErrorBoundary';
 import { SpawnAgentDialog } from '@/features/sessions/SpawnAgentDialog';
 import { DEFAULT_CHAT_PATH_LINKS_CONFIG, parseChatPathLinksConfig } from '@/features/chat/chatPathLinks';
 import { FileTreePanel, TabbedContentArea, useOpenFiles, type FileTreeChangeEvent } from '@/features/file-browser';
+import { loadSavedRoot } from '@/features/file-browser/hooks/useRootSwitcher';
 import { type BeadLinkTarget, type OpenBeadTab, buildBeadTabId } from '@/features/beads';
 import { isImageFile } from '@/features/file-browser/utils/fileTypes';
 import { buildAgentRootSessionKey, getSessionDisplayLabel } from '@/features/sessions/sessionKeys';
@@ -146,6 +147,46 @@ export default function App({ onLogout }: AppProps) {
     kind: 'file' | 'directory';
     agentId: string;
   } | null>(null);
+
+  // Vault file tree state — selectedRoot and vaultRoot owned by App (persisted via localStorage),
+  // so App can pass vaultRoot to useOpenFiles for vault file open/save routing. selectedRoot
+  // is kept in sync with the dropdown in FileTreePanel via the localStorage key.
+  const [selectedRoot, setSelectedRoot] = useState<'workspace' | 'vault'>(() => loadSavedRoot());
+  const [vaultRoot, setVaultRoot] = useState<string | null>(null);
+
+  // Sync selectedRoot to localStorage so FileTreePanel's useRootSwitcher picks it up on re-render
+  useEffect(() => {
+    try {
+      localStorage.setItem('nerve:file-tree:root', selectedRoot);
+    } catch { /* ignore */ }
+  }, [selectedRoot]);
+
+  // Keep selectedRoot in sync with localStorage (FileTreePanel writes to it via its dropdown)
+  useEffect(() => {
+    const handleStorage = () => {
+      try {
+        const stored = localStorage.getItem('nerve:file-tree:root');
+        if (stored === 'vault' || stored === 'workspace') setSelectedRoot(stored);
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  // Fetch vaultRoot from the config endpoint on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/config/vaultRoot')
+      .then((res) => { if (cancelled || !res.ok) return null; return res.json(); })
+      .then((data: { vaultRoot?: string } | null) => {
+        if (cancelled) return;
+        if (data?.vaultRoot) setVaultRoot(data.vaultRoot);
+        else setVaultRoot(null);
+      })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const fileTreeChangeSequenceRef = useRef(0);
 
   const initialCompactLayout = typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches;
@@ -206,7 +247,7 @@ export default function App({ onLogout }: AppProps) {
     openFile, closeFile, updateContent, saveFile, reloadFile,
     handleFileChanged, remapOpenPaths, closeOpenPathsByPrefix,
     hasDirtyFiles, saveAllDirtyFiles, discardAllDirtyFiles,
-  } = useOpenFiles(workspaceAgentId);
+  } = useOpenFiles(workspaceAgentId, { vaultRoot });
 
   // Save with workspace-scoped conflict toast
   const [saveToast, setSaveToast] = useState<{
