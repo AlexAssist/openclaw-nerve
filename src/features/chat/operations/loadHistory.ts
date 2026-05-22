@@ -228,6 +228,21 @@ const TTS_SYSTEM_HINT_RE = /\s*\[system: User sent a voice message\.[\s\S]*$/;
  */
 const WEBCHAT_ENVELOPE_RE = /Conversation info \(untrusted metadata\):[\s\S]*?"sender":\s*"[^"]*"\s*\}\s*\n?(?:```\s*\n?)?(?:\n?\[[\w, ]+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]\s*)?/g;
 
+/**
+ * Returns true if a user message body would survive all gateway/voice/envelope
+ * stripping done by {@link splitToolCallMessage} as a non-empty bubble. Mirrors
+ * the in-function strip pipeline so callers can predict projection output
+ * without running the full split. Used by the chat-runtime windowed projection
+ * to keep totalMessages in sync with rendered ChatMsgs.
+ */
+export function userTextProjects(text: string): boolean {
+  const stripped = text
+    .replace(TTS_SYSTEM_HINT_RE, '')
+    .replace(WEBCHAT_ENVELOPE_RE, '')
+    .replace(/^\[voice\]\s*/, '');
+  return stripped.trim().length > 0;
+}
+
 /** Strip ANSI escape sequences (e.g. \x1b[33m) from terminal output. */
 // eslint-disable-next-line no-control-regex
 const stripAnsi = (s: string) => s.replace(/\x1b\[\d*(?:;\d+)*m/g, '');

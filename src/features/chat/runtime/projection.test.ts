@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '@/utils/helpers';
-import { projectTimeline } from './projection';
+import { projectItemCount, projectTimeline } from './projection';
 import type {
   AssistantTimelineItem,
   SessionTimeline,
+  SystemTimelineItem,
   ThinkingTimelineItem,
   TimelineItem,
   TimelineTurn,
   ToolCallTimelineItem,
   ToolGroupTimelineItem,
+  ToolResultTimelineItem,
   UserTimelineItem,
 } from './types';
 
@@ -364,6 +366,148 @@ describe('chat runtime projection', () => {
     expect(projection.messages[1].toolGroup).toHaveLength(2);
     expect(projection.processingStage).toBe('streaming');
   });
+
+  describe('totalMessages consistency (#344)', () => {
+    it('excludes voice-only-no-media user items from totalMessages', () => {
+      const turn = makeTurn('session-1', 'run-1', 0, 'finalized');
+      const timeline = makeTimeline('session-1', [turn], {
+        'user-voice-empty': userItem(turn, 'user-voice-empty', '[voice] ', 0),
+        'assistant-1': assistantItem(turn, 'assistant-1', 'reply', 1, false),
+      });
+
+      const projection = projectTimeline(timeline, { visibleCount: 50 });
+
+      expect(projection.totalMessages).toBe(projection.messages.length);
+      expect(projection.totalMessages).toBe(1);
+      expect(projection.messages.map((message) => message.msgId)).toEqual(['assistant-1']);
+    });
+
+    it('keeps totalMessages and messages.length in sync for voice-only with attachments', () => {
+      const turn = makeTurn('session-1', 'run-1', 0, 'finalized');
+      const userWithMedia: UserTimelineItem = {
+        ...userItem(turn, 'user-voice-media', '[voice] ', 0),
+        uploadAttachments: [
+          {
+            id: 'att-1',
+            origin: 'upload',
+            mode: 'inline',
+            name: 'note.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 12,
+            policy: { forwardToSubagents: false },
+          },
+        ],
+      };
+      const timeline = makeTimeline('session-1', [turn], {
+        'user-voice-media': userWithMedia,
+        'assistant-1': assistantItem(turn, 'assistant-1', 'got it', 1, false),
+      });
+
+      const projection = projectTimeline(timeline, { visibleCount: 50 });
+
+      expect(projection.totalMessages).toBe(projection.messages.length);
+      expect(projection.totalMessages).toBe(2);
+    });
+
+    it.each<{ name: string; build: () => { item: TimelineItem; expected: 0 | 1 } }>([
+      {
+        name: 'finalized assistant with text',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: assistantItem(t, 'a-text', 'hello', 0, false), expected: 1 };
+        },
+      },
+      {
+        name: 'streaming assistant with empty text',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'running');
+          return { item: assistantItem(t, 'a-stream', '', 0, true), expected: 1 };
+        },
+      },
+      {
+        name: 'finalized assistant with empty text',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: assistantItem(t, 'a-empty', '', 0, false), expected: 0 };
+        },
+      },
+      {
+        name: 'thinking with text',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: thinkingItem(t, 'think', 'pondering', 0, 'complete'), expected: 1 };
+        },
+      },
+      {
+        name: 'thinking with empty text',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: thinkingItem(t, 'think-empty', '', 0, 'complete'), expected: 0 };
+        },
+      },
+      {
+        name: 'user with plain text',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: userItem(t, 'u-plain', 'hi there', 0), expected: 1 };
+        },
+      },
+      {
+        name: 'user voice-only with no media',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: userItem(t, 'u-voice-empty', '[voice] ', 0), expected: 0 };
+        },
+      },
+      {
+        name: 'user voice-only with media',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          const item: UserTimelineItem = {
+            ...userItem(t, 'u-voice-media', '[voice] ', 0),
+            uploadAttachments: [
+          {
+            id: 'att-1',
+            origin: 'upload',
+            mode: 'inline',
+            name: 'note.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 12,
+            policy: { forwardToSubagents: false },
+          },
+        ],
+          };
+          return { item, expected: 1 };
+        },
+      },
+      {
+        name: 'system event',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: systemItem(t, 'sys-1', 'system note', 0, 'info'), expected: 1 };
+        },
+      },
+      {
+        name: 'tool_result',
+        build: () => {
+          const t = makeTurn('session', 'run', 0, 'finalized');
+          return { item: toolResultItem(t, 'tr-1', 'ok', 0), expected: 1 };
+        },
+      },
+    ])(
+      'projectItemCount matches projected output length for $name',
+      ({ build }) => {
+        const { item, expected } = build();
+        expect(projectItemCount(item)).toBe(expected);
+
+        const turn = makeTurn(item.sessionKey, item.runId, 0, 'finalized');
+        const timeline = makeTimeline(item.sessionKey, [turn], { [item.id]: item });
+        const projection = projectTimeline(timeline, { visibleCount: 50 });
+        expect(projection.messages.length).toBe(expected);
+        expect(projection.totalMessages).toBe(expected);
+      },
+    );
+  });
 });
 
 function makeTimeline(
@@ -508,6 +652,50 @@ function assistantItem(
     updatedAt: 1_775_000_000_000 + block,
     status: isStreaming ? 'running' : 'complete',
     source: isStreaming ? 'live' : 'history',
+  };
+}
+
+function systemItem(
+  turn: TimelineTurn,
+  id: string,
+  text: string,
+  block: number,
+  severity: SystemTimelineItem['severity'],
+): SystemTimelineItem {
+  return {
+    id,
+    sessionKey: turn.sessionKey,
+    turnId: turn.id,
+    runId: turn.runId,
+    kind: 'system_event',
+    text,
+    severity,
+    orderKey: { turn: turn.orderBase.turn, block, sub: 0 },
+    createdAt: 1_775_000_000_000 + block,
+    updatedAt: 1_775_000_000_000 + block,
+    status: 'complete',
+    source: 'system',
+  };
+}
+
+function toolResultItem(
+  turn: TimelineTurn,
+  id: string,
+  text: string,
+  block: number,
+): ToolResultTimelineItem {
+  return {
+    id,
+    sessionKey: turn.sessionKey,
+    turnId: turn.id,
+    runId: turn.runId,
+    kind: 'tool_result',
+    text,
+    orderKey: { turn: turn.orderBase.turn, block, sub: 0 },
+    createdAt: 1_775_000_000_000 + block,
+    updatedAt: 1_775_000_000_000 + block,
+    status: 'complete',
+    source: 'history',
   };
 }
 

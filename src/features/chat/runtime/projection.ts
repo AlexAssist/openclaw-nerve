@@ -1,5 +1,5 @@
 import type { ChatMessage } from '@/types';
-import { splitToolCallMessage } from '@/features/chat/operations';
+import { splitToolCallMessage, userTextProjects } from '@/features/chat/operations';
 import type { ChatMsg, ToolGroupEntry } from '@/features/chat/types';
 import { extractTTSMarkers } from '@/features/tts/useTTS';
 import { describeToolUse, renderMarkdown, renderToolResults } from '@/utils/helpers';
@@ -130,11 +130,11 @@ function projectMessages(
       continue;
     }
 
-    const messageCount = countProjectedItemMessages(item);
+    const messageCount = projectItemCount(item);
     totalMessages += messageCount;
     if (messageCount > 0 && visibleMessages.length < visibleCount) {
-      const remaining = visibleCount - visibleMessages.length;
       const projected = projectItem(item, options);
+      const remaining = Math.min(visibleCount - visibleMessages.length, projected.length);
       visibleMessages.unshift(...projected.slice(-remaining));
     }
     index--;
@@ -357,13 +357,13 @@ function countProjectedMessages(orderedItems: TimelineItem[]): number {
       continue;
     }
     inToolRun = false;
-    count += countProjectedItemMessages(item);
+    count += projectItemCount(item);
   }
 
   return count;
 }
 
-function countProjectedItemMessages(item: TimelineItem): number {
+export function projectItemCount(item: TimelineItem): number {
   switch (item.kind) {
     case 'tool_group':
     case 'tool_call':
@@ -373,8 +373,11 @@ function countProjectedItemMessages(item: TimelineItem): number {
       return item.text.trim() || item.isStreaming ? 1 : 0;
     case 'thinking':
       return item.text.trim() ? 1 : 0;
-    case 'user_message':
-      return item.text.trim() || item.images?.length || item.uploadAttachments?.length ? 1 : 0;
+    case 'user_message': {
+      if (userTextProjects(item.text)) return 1;
+      if (item.images?.length || item.uploadAttachments?.length) return 1;
+      return 0;
+    }
     case 'tool_result':
     case 'system_event':
       return 1;
