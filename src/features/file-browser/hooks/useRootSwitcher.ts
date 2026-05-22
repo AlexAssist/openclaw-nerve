@@ -18,9 +18,17 @@ export function saveRoot(root: FileTreeRoot) {
   } catch { /* ignore */ }
 }
 
-/** Hook for managing the selected file tree root (workspace vs vault). */
-export function useRootSwitcher() {
-  const [selectedRoot, setSelectedRootState] = useState<FileTreeRoot>(() => loadSavedRoot());
+/**
+ * Hook for managing the selected file tree root (workspace vs vault).
+ *
+ * @param vaultMode - when true, initial state is 'vault' regardless of localStorage.
+ *                    The dropdown can still override this at runtime.
+ */
+export function useRootSwitcher(vaultMode?: boolean) {
+  const [selectedRoot, setSelectedRootState] = useState<FileTreeRoot>(() => {
+    if (vaultMode) return 'vault';
+    return loadSavedRoot();
+  });
   const [vaultAvailable, setVaultAvailable] = useState(true);
 
   // Check vault availability on mount

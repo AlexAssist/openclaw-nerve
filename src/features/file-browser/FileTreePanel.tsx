@@ -74,6 +74,8 @@ interface FileTreePanelProps {
   onCollapseChange: (collapsed: boolean) => void;
   /** External control of collapsed state */
   collapsed: boolean;
+  /** When true, the vault tree is active by default (default: false) */
+  vaultMode?: boolean;
 }
 
 interface FileOpResult {
@@ -119,9 +121,10 @@ export function FileTreePanel({
   isCompactLayout = false,
   onCollapseChange,
   collapsed,
+  vaultMode,
 }: FileTreePanelProps) {
   const { showHiddenWorkspaceEntries } = useSettings();
-  const { selectedRoot, setSelectedRoot, vaultAvailable } = useRootSwitcher();
+  const { selectedRoot, setSelectedRoot, vaultAvailable } = useRootSwitcher(vaultMode);
   // Call both hooks unconditionally (Rules of Hooks), pick based on selectedRoot at render time.
   const workspaceTree = useFileTree(workspaceAgentId, showHiddenWorkspaceEntries);
   const vaultTree = useVaultTree(showHiddenWorkspaceEntries);
