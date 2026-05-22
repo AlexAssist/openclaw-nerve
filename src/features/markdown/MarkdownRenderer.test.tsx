@@ -912,6 +912,14 @@ describe('MarkdownRenderer', () => {
       expect(document.querySelector('.katex')).toBeNull();
     });
 
+    it('does not parse fenced ```math code blocks as equations', () => {
+      render(<MarkdownRenderer content={'```math\n\\frac{1}{2}\n```'} />);
+      const pre = document.querySelector('pre');
+      expect(pre).toBeTruthy();
+      expect(pre?.textContent).toContain('\\frac{1}{2}');
+      expect(document.querySelector('.katex')).toBeNull();
+    });
+
     it('does not parse dollar signs inside inline code as math', () => {
       render(<MarkdownRenderer content="Use the `$variable` syntax for shell expansion" />);
       const code = document.querySelector('code');

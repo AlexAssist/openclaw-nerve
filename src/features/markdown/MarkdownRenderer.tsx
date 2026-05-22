@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import type { PluggableList } from 'unified';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -25,8 +26,33 @@ const REHYPE_KATEX_OPTIONS = {
   maxExpand: 1000,
 };
 
-const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkStableHeadingIds];
-const REHYPE_PLUGINS: Array<[typeof rehypeKatex, typeof REHYPE_KATEX_OPTIONS]> = [
+// rehype-katex targets <code class="language-math|math-display|math-inline"> nodes.
+// That picks up both legit math (remark-math emits these classes alongside
+// math-inline/math-display on its own <code> nodes) AND fenced ```math code
+// blocks (markdown emits only language-math). We want the former typeset and
+// the latter preserved as a code block (R3). The heuristic: strip language-math
+// only when math-inline/math-display are not also present, so rehype-katex
+// continues to see remark-math's output and skips standalone ```math fences.
+type HastNode = { type?: string; tagName?: string; properties?: { className?: unknown }; children?: HastNode[] };
+function rehypeStripCodeOnlyMathClass() {
+  const walk = (node: HastNode | undefined) => {
+    if (!node) return;
+    if (node.type === 'element' && node.tagName === 'code' && node.properties) {
+      const raw = node.properties.className;
+      const list = Array.isArray(raw) ? (raw as string[]) : raw ? [raw as string] : [];
+      const isRemarkMath = list.includes('math-inline') || list.includes('math-display');
+      if (!isRemarkMath && list.includes('language-math')) {
+        node.properties.className = list.filter((cls) => cls !== 'language-math');
+      }
+    }
+    node.children?.forEach(walk);
+  };
+  return (tree: HastNode) => walk(tree);
+}
+
+const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath, remarkStableHeadingIds];
+const REHYPE_PLUGINS: PluggableList = [
+  rehypeStripCodeOnlyMathClass,
   [rehypeKatex, REHYPE_KATEX_OPTIONS],
 ];
 

@@ -81,11 +81,13 @@ If false positives in production prose surface, the option `singleDollarTextMath
 ### D3. KaTeX `output: 'htmlAndMathml'` (rehype-katex default)
 Keep both HTML (visual) and MathML (screen reader) trees. Bundle cost is small relative to KaTeX's JS engine, and we gain accessibility for free. The codebase's `sanitizeHtml()` (which forbids `<math>`) is applied only to `dangerouslySetInnerHTML` for highlight.js output — it does NOT run over the react-markdown tree, so the MathML tree survives. See verification in U2.
 
-### D4. KaTeX `trust: false`, `strict: 'ignore'`, `throwOnError: false`
-The three KaTeX options actually relevant to chat safety:
+### D4. KaTeX `trust: false`, `strict: 'ignore'` (plus `errorColor`, `maxSize`, `maxExpand`)
+The KaTeX options actually relevant to chat safety and UX:
 - `trust: false` — disable `\href`, `\includegraphics`, `\htmlClass`, `\htmlId` so untrusted LaTeX cannot inject links or class names. This is the default but we pass it explicitly so future contributors see the intent.
 - `strict: 'ignore'` — unknown commands silently fall through instead of warning to console for every malformed assistant reply.
-- `throwOnError: false` — render the error inline (red) rather than throwing and unmounting the message bubble (R4).
+- `errorColor: 'currentColor'` — KaTeX writes the error color as an inline `style="color:..."` attribute that overrides any external CSS rule; setting it to `currentColor` makes the surrounding theme cascade win (R5).
+- `maxSize: 100`, `maxExpand: 1000` — bound rendered element size and macro expansion so adversarial LaTeX cannot DoS the UI (R6).
+- We do not pass `throwOnError`; rehype-katex hardcodes the error catch internally, so the option is silently ignored. R4 (no crash on malformed input) is delivered by that internal catch, not by anything we pass.
 
 ### D5. CSS imported once at the app entry, not inside the lazy chunk
 `katex.min.css` is imported from `src/main.tsx` alongside `index.css`. The CSS is tiny (~24 KB minified) and importing it lazily inside `MarkdownRenderer` would cause a visible re-layout when the first equation paints. App-entry import preserves R7's spirit (the JS bundle cost still lazy-loads inside the markdown chunk) while avoiding the flash.
@@ -107,7 +109,8 @@ chat message text
   │     ├─ remarkPlugins:  [remarkGfm, remarkMath, remarkStableHeadingIds]
   │     │                                ▲
   │     │                                └── parses `$...$` and `$$...$$` into math nodes
-  │     ├─ rehypePlugins:  [[rehypeKatex, { strict: 'ignore', throwOnError: false, trust: false }]]
+  │     ├─ rehypePlugins:  [rehypeStripCodeOnlyMathClass,
+  │     │                    [rehypeKatex, { strict, trust, errorColor, maxSize, maxExpand }]]
   │     │                                ▲
   │     │                                └── converts math nodes to KaTeX hast (HTML + MathML)
   │     └─ components/urlTransform: unchanged
