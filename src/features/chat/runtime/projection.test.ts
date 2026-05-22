@@ -587,11 +587,13 @@ describe('chat runtime projection', () => {
 
       const windowed = projectTimeline(timeline, { visibleCount: 50 });
       const linear = projectTimeline(timeline);
+      const zeroVisible = projectTimeline(timeline, { visibleCount: 0 });
 
       expect(windowed.totalMessages).toBe(windowed.messages.length);
       expect(windowed.totalMessages).toBe(linear.messages.length);
       expect(windowed.messages.map((m) => m.role)).toEqual(linear.messages.map((m) => m.role));
       expect(windowed.messages.map((m) => m.msgId)).toEqual(linear.messages.map((m) => m.msgId));
+      expect(zeroVisible.totalMessages).toBe(linear.messages.length);
       const toolGroups = windowed.messages.filter((m) => m.toolGroup);
       expect(toolGroups).toHaveLength(1);
       expect(toolGroups[0].toolGroup).toHaveLength(3);

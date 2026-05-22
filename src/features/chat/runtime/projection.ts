@@ -359,8 +359,11 @@ function countProjectedMessages(orderedItems: TimelineItem[]): number {
       inToolRun = true;
       continue;
     }
-    inToolRun = false;
-    count += projectItemCount(item);
+    const itemCount = projectItemCount(item);
+    if (itemCount > 0) {
+      inToolRun = false;
+    }
+    count += itemCount;
   }
 
   return count;
