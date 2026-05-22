@@ -55,6 +55,24 @@ function getConnectRequest(ws: MockWebSocket): Record<string, unknown> | null {
   return JSON.parse(connectReq) as Record<string, unknown>;
 }
 
+function simulateAuthHandshake(ws: MockWebSocket, nonce = 'test-nonce') {
+  ws.simulateMessage({
+    type: 'event',
+    event: 'connect.challenge',
+    payload: { nonce },
+  });
+
+  const connectReq = getConnectRequest(ws);
+  expect(connectReq).toBeTruthy();
+
+  ws.simulateMessage({
+    type: 'res',
+    id: connectReq?.id,
+    ok: true,
+    payload: { sessionId: 'test-session' },
+  });
+}
+
 describe('useWebSocket', () => {
   let originalWebSocket: typeof WebSocket;
 
@@ -77,11 +95,158 @@ describe('useWebSocket', () => {
       expect(result.current.connectionState).toBe('disconnected');
     });
 
+    it('rejects the initial connect promise if the socket closes before handshake completes', async () => {
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      const { result } = renderHook(() => useWebSocket());
+
+      let connectError: Error | null = null;
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+          connectError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      act(() => {
+        wsInstances[0].close();
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(connectError?.message).toBe('WebSocket disconnected before connect completed');
+      expect(result.current.connectionState).toBe('disconnected');
+    });
+
+    it('rejects the initial connect promise if the socket closes mid-handshake after challenge', async () => {
+      // Covers the specific case the PR set out to fix: connect.challenge has
+      // arrived, the auth request is in flight, then the socket closes before
+      // the auth response. connectReqIdRef.current is non-null when onclose
+      // fires, so this exercises a different code path than the close-before-
+      // challenge test above.
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      const { result } = renderHook(() => useWebSocket());
+
+      let connectError: Error | null = null;
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+          connectError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      const ws = wsInstances[0];
+      act(() => {
+        ws.simulateMessage({ type: 'event', event: 'connect.challenge', payload: { nonce: 'mid-handshake' } });
+      });
+
+      // The hook should have sent the auth request now; verify so the test fails
+      // loudly if the precondition stops holding.
+      expect(getConnectRequest(ws)).toBeTruthy();
+
+      act(() => {
+        ws.close();
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(connectError?.message).toBe('WebSocket disconnected before connect completed');
+      expect(result.current.connectionState).toBe('disconnected');
+    });
+
+    it('rejects the previous in-flight connect when a new connect() supersedes it', async () => {
+      // Regression: a second connect() used to overwrite connectResolveRef /
+      // connectRejectRef without settling the first attempt. Combined with the
+      // stale-generation guard in onclose, that left the first promise pending
+      // forever and re-introduced the hang the PR set out to fix.
+      const wsInstances: MockWebSocket[] = [];
+      const OriginalMockWS = MockWebSocket;
+      (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = class extends OriginalMockWS {
+        constructor(url: string) {
+          super(url);
+          wsInstances.push(this);
+        }
+      };
+
+      const { result } = renderHook(() => useWebSocket());
+
+      let firstError: Error | null = null;
+      let secondError: Error | null = null;
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'first-token').catch((err: Error) => {
+          firstError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Start a second connect before the first one settles.
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'second-token').catch((err: Error) => {
+          secondError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(firstError?.message).toBe('Superseded by a new connection attempt');
+      expect(secondError).toBeNull();
+    });
+
+    it('times out the initial connect attempt instead of hanging forever', async () => {
+      const { result } = renderHook(() => useWebSocket());
+
+      let connectError: Error | null = null;
+      act(() => {
+        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+          connectError = err;
+        });
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10001);
+        await vi.runAllTimersAsync();
+      });
+
+      expect(connectError?.message).toBe('Connection timed out');
+      expect(result.current.connectionState).toBe('disconnected');
+      expect(result.current.connectError).toBe('Connection timed out — retry');
+    });
+
     it('should transition to connecting state when connect is called', async () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       expect(result.current.connectionState).toBe('connecting');
@@ -91,7 +256,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -124,11 +289,11 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       const ws = wsInstances[0];
@@ -156,11 +321,11 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       const ws = wsInstances[0];
@@ -189,7 +354,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -215,13 +380,16 @@ describe('useWebSocket', () => {
         firstWs.simulateMessage({ type: 'res', id: firstReqId, ok: true, payload: {} });
       });
 
-      // unexpected close triggers reconnect
+      // unexpected close triggers reconnect. Advance only enough to fire the
+      // reconnect delay (~1000-1500ms) without letting the new socket's
+      // CONNECT_TIMEOUT_MS (10s) fire, which would close it and cause an
+      // infinite reconnect loop under correct stale-onclose handling.
       act(() => {
         firstWs.close();
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
       });
 
       expect(wsInstances.length).toBeGreaterThanOrEqual(2);
@@ -270,7 +438,7 @@ describe('useWebSocket', () => {
       
       // Initial connection
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -285,13 +453,14 @@ describe('useWebSocket', () => {
         simulateAuthHandshake(firstWs);
       });
 
-      // Simulate unexpected close
+      // Simulate unexpected close. Advance just past the reconnect delay
+      // without letting the new socket's CONNECT_TIMEOUT_MS (10s) fire.
       act(() => {
         firstWs.close();
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
       });
 
       expect(result.current.connectionState).toBe('reconnecting');
@@ -311,7 +480,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -345,7 +514,7 @@ describe('useWebSocket', () => {
       expect(result.current.reconnectAttempt).toBe(0);
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       expect(result.current.reconnectAttempt).toBe(0);
@@ -370,7 +539,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
@@ -382,12 +551,15 @@ describe('useWebSocket', () => {
         simulateAuthHandshake(firstWs);
       });
 
+      // Advance only past the reconnect delay so the new ws is created without
+      // letting its CONNECT_TIMEOUT_MS fire (which would otherwise loop forever
+      // now that stale onclose no longer clobbers the new socket's timeout).
       act(() => {
         firstWs.close();
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
       });
 
       expect(wsInstances.length).toBeGreaterThanOrEqual(2);
@@ -409,8 +581,9 @@ describe('useWebSocket', () => {
         });
       });
 
+      // Auth failure triggers another reconnect; advance past that delay too.
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(3000);
       });
 
       expect(result.current.connectionState).toBe('reconnecting');
@@ -434,11 +607,15 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      act(() => {
+        simulateAuthHandshake(wsInstances[0]);
       });
 
       let rpcError: Error | null = null;
@@ -486,11 +663,11 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token');
+        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       act(() => {
@@ -498,7 +675,7 @@ describe('useWebSocket', () => {
       });
 
       await act(async () => {
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(0);
       });
 
       const ws = wsInstances[0];
@@ -523,7 +700,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('wss://secure.example.com', 'token');
+        result.current.connect('wss://secure.example.com', 'token').catch(() => {});
       });
 
       expect(result.current.connectionState).toBe('connecting');
@@ -534,7 +711,7 @@ describe('useWebSocket', () => {
       
       expect(() => {
         act(() => {
-          result.current.connect('ws://localhost:8080', 'test-token');
+          result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
         });
       }).not.toThrow();
     });

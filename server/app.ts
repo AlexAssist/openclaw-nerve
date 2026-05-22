@@ -103,9 +103,22 @@ app.use('*', async (c, next) => {
   if (c.req.path.startsWith('/api/')) return next();
   return serveStatic({ root: './dist/' })(c, next);
 });
-// SPA fallback — serve index.html for non-API routes (client-side routing)
+// SPA fallback — serve index.html only for extensionless app routes.
+// If a hashed asset or other static file is missing, return 404 instead of
+// silently serving index.html. That avoids stale post-upgrade bundles loading
+// HTML as JavaScript after a deploy/release switch.
 app.get('*', async (c, next) => {
   if (c.req.path.startsWith('/api/')) return next();
+
+  // Match a real file extension at the end of the path (e.g., `.js`, `.css`, `.map`)
+  // rather than any dot anywhere in the path. The previous `.includes('.')`
+  // would 404 paths like `/.well-known/acme-challenge/<token>` or any future
+  // app route with a dot in a directory segment.
+  const looksLikeStaticFile = c.req.path.startsWith('/assets/') || /\.[a-zA-Z0-9]+$/.test(c.req.path);
+  if (looksLikeStaticFile) {
+    return c.notFound();
+  }
+
   return serveStatic({ root: './dist/', path: 'index.html' })(c, next);
 });
 
