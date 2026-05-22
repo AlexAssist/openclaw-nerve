@@ -920,10 +920,17 @@ describe('MarkdownRenderer', () => {
       expect(document.querySelector('.katex')).toBeNull();
     });
 
-    it('does not throw on malformed LaTeX', () => {
-      expect(() =>
-        render(<MarkdownRenderer content="Try $\\frac{1$ now" />),
-      ).not.toThrow();
+    it('does not throw on malformed LaTeX and renders a visible error fallback', () => {
+      let container: HTMLElement | null = null;
+      expect(() => {
+        const result = render(<MarkdownRenderer content="Try $\\frac{1$ now" />);
+        container = result.container;
+      }).not.toThrow();
+      // R4: malformed LaTeX should not crash; rehype-katex catches the parse error
+      // and emits a .katex-error span (or, in some edge cases, the raw source).
+      const errorSpan = container!.querySelector('.katex-error');
+      const rawSourceVisible = container!.textContent?.includes('\\frac');
+      expect(errorSpan ?? rawSourceVisible ?? null).toBeTruthy();
     });
 
     // remark-math v6 enables single-dollar inline math by default, which is required

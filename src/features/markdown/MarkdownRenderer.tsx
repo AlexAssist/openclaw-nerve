@@ -10,6 +10,26 @@ import { CodeBlockActions } from './CodeBlockActions';
 import { parseBeadLinkHref, type BeadLinkTarget } from '@/features/beads';
 import { renderInlinePathReferences } from './inlineReferences';
 
+// KaTeX options (D4): trust=false blocks \href and other vector commands;
+// strict='ignore' silences warnings on assistant-emitted unknown commands;
+// errorColor='currentColor' lets the surrounding theme cascade win over KaTeX's
+// inline error color (KaTeX writes the value as an inline style attribute, which
+// would otherwise defeat the .katex-error CSS rule); maxSize and maxExpand bound
+// rendered-element size and macro expansion so untrusted LaTeX cannot DoS the UI.
+// (rehype-katex hardcodes throwOnError internally, so we do not pass it.)
+const REHYPE_KATEX_OPTIONS = {
+  strict: 'ignore' as const,
+  trust: false,
+  errorColor: 'currentColor',
+  maxSize: 100,
+  maxExpand: 1000,
+};
+
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkStableHeadingIds];
+const REHYPE_PLUGINS: Array<[typeof rehypeKatex, typeof REHYPE_KATEX_OPTIONS]> = [
+  [rehypeKatex, REHYPE_KATEX_OPTIONS],
+];
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
@@ -541,8 +561,8 @@ export function MarkdownRenderer({
   return (
     <div ref={containerRef} className={`markdown-content ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkStableHeadingIds]}
-        rehypePlugins={[[rehypeKatex, { strict: 'ignore', throwOnError: false, trust: false }]]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         urlTransform={(url) => transformMarkdownUrl(url, {
           currentDocumentPath,
           workspaceAgentId,
