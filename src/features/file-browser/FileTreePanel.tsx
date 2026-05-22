@@ -10,6 +10,9 @@ import { PanelLeftClose, RefreshCw, X } from 'lucide-react';
 import { FileTreeNode } from './FileTreeNode';
 import { buildFileTreeMenuActions } from './fileTreeMenuActions';
 import { useFileTree } from './hooks/useFileTree';
+import { useVaultTree } from './hooks/useVaultTree';
+import { useRootSwitcher } from './hooks/useRootSwitcher';
+import { InlineSelect } from '@/components/ui/InlineSelect';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useSettings } from '@/contexts/SettingsContext';
 import type { TreeEntry } from './types';
@@ -118,10 +121,14 @@ export function FileTreePanel({
   collapsed,
 }: FileTreePanelProps) {
   const { showHiddenWorkspaceEntries } = useSettings();
+  const { selectedRoot, setSelectedRoot, vaultAvailable } = useRootSwitcher();
+  // Call both hooks unconditionally (Rules of Hooks), pick based on selectedRoot at render time.
+  const workspaceTree = useFileTree(workspaceAgentId, showHiddenWorkspaceEntries);
+  const vaultTree = useVaultTree(showHiddenWorkspaceEntries);
   const {
     entries, loading, error, expandedPaths, selectedPath,
     loadingPaths, workspaceInfo, toggleDirectory, selectFile, refresh, handleFileChange, revealPath,
-  } = useFileTree(workspaceAgentId, showHiddenWorkspaceEntries);
+  } = selectedRoot === 'vault' ? vaultTree : workspaceTree;
 
   // React to external file changes. Sequence keeps repeated same-path events distinct,
   // and agentId prevents a stale event from one workspace from replaying in another.
@@ -787,9 +794,16 @@ export function FileTreePanel({
           }}
           onDrop={handleRootDrop}
         >
-          <span className="text-[0.667rem] font-mono font-semibold uppercase tracking-[0.26em] text-muted-foreground">
-            {workspaceInfo?.isCustomWorkspace ? workspaceInfo.rootPath : 'Workspace'}
-          </span>
+          <InlineSelect
+            value={selectedRoot}
+            onChange={setSelectedRoot}
+            options={[
+              { value: 'workspace', label: 'Workspace' },
+              { value: 'vault', label: vaultAvailable ? 'Vault' : 'Vault ⚠' },
+            ]}
+            ariaLabel="Select file tree root"
+            triggerClassName="border-border/60 bg-background/40"
+          />
           <div className="flex items-center gap-2">
             <button
               onClick={() => refresh(workspaceAgentId)}

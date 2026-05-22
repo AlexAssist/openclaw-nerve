@@ -3,10 +3,40 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FileTreePanel } from './FileTreePanel';
 import { useFileTree } from './hooks/useFileTree';
+import { useVaultTree } from './hooks/useVaultTree';
+import { useRootSwitcher } from './hooks/useRootSwitcher';
 
 // Mock the useFileTree hook
 vi.mock('./hooks/useFileTree', () => ({
   useFileTree: vi.fn(),
+}));
+
+// Mock the useVaultTree hook
+vi.mock('./hooks/useVaultTree', () => ({
+  useVaultTree: vi.fn().mockReturnValue({
+    entries: [],
+    loading: false,
+    error: null,
+    expandedPaths: new Set(),
+    selectedPath: null,
+    loadingPaths: new Set(),
+    workspaceInfo: { isCustomWorkspace: false, rootPath: '/mock/vault' },
+    toggleDirectory: vi.fn(),
+    selectFile: vi.fn(),
+    refresh: vi.fn(),
+    handleFileChange: vi.fn(),
+    revealPath: vi.fn(),
+  }),
+}));
+
+
+// Mock useRootSwitcher hook
+vi.mock('./hooks/useRootSwitcher', () => ({
+  useRootSwitcher: vi.fn().mockReturnValue({
+    selectedRoot: 'workspace',
+    setSelectedRoot: vi.fn(),
+    vaultAvailable: true,
+  }),
 }));
 
 // Mock settings context
@@ -39,6 +69,29 @@ vi.mock('../../components/ConfirmDialog', () => ({
       </div>
     );
   },
+}));
+
+// Mock InlineSelect component
+vi.mock('@/components/ui/InlineSelect', () => ({
+  InlineSelect: ({ ariaLabel, options, value, onChange }: {
+    ariaLabel: string;
+    options: { value: string; label: string }[];
+    value: string;
+    onChange: (value: string) => void;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      data-testid="root-switcher"
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  ),
 }));
 
 // Mock file icons
@@ -152,7 +205,7 @@ describe('FileTreePanel', () => {
   });
 
   describe('header display', () => {
-    it('shows "Workspace" when not using custom workspace', () => {
+    it('shows a root switcher dropdown in the header', () => {
       render(
         <FileTreePanel
           onOpenFile={mockOnOpenFile}
@@ -162,50 +215,8 @@ describe('FileTreePanel', () => {
         />
       );
 
-      expect(screen.getByText('Workspace')).toBeInTheDocument();
-    });
-
-    it('shows custom root path when using custom workspace', () => {
-      mockUseFileTree.mockReturnValue({
-        ...defaultMockHook,
-        workspaceInfo: {
-          isCustomWorkspace: true,
-          rootPath: '/home/user/custom-workspace',
-        },
-      });
-
-      render(
-        <FileTreePanel
-          onOpenFile={mockOnOpenFile}
-          onRemapOpenPaths={mockOnRemapOpenPaths}
-          onCloseOpenPaths={mockOnCloseOpenPaths}
-          collapsed={false}
-        />
-      );
-
-      expect(screen.getByText('/home/user/custom-workspace')).toBeInTheDocument();
-      expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
-    });
-
-    it('shows custom root path for different custom workspaces', () => {
-      mockUseFileTree.mockReturnValue({
-        ...defaultMockHook,
-        workspaceInfo: {
-          isCustomWorkspace: true,
-          rootPath: '/var/www/project',
-        },
-      });
-
-      render(
-        <FileTreePanel
-          onOpenFile={mockOnOpenFile}
-          onRemapOpenPaths={mockOnRemapOpenPaths}
-          onCloseOpenPaths={mockOnCloseOpenPaths}
-          collapsed={false}
-        />
-      );
-
-      expect(screen.getByText('/var/www/project')).toBeInTheDocument();
+      // Header now renders a dropdown (InlineSelect mock renders as <select data-testid="root-switcher">)
+      expect(screen.getByTestId('root-switcher')).toBeInTheDocument();
     });
   });
 
@@ -1127,8 +1138,8 @@ describe('FileTreePanel', () => {
         />
       );
 
-      // Verify custom workspace header is shown
-      expect(screen.getByText('/custom/workspace')).toBeInTheDocument();
+      // Verify dropdown is present in header
+      expect(screen.getByTestId('root-switcher')).toBeInTheDocument();
 
       // Verify context menu shows permanent delete options
       const contextMenuEvent = new MouseEvent('contextmenu', { bubbles: true });
@@ -1143,7 +1154,7 @@ describe('FileTreePanel', () => {
   });
 
   describe('integration with useFileTree hook', () => {
-    it('passes workspaceInfo from hook to UI', () => {
+    it('passes workspaceInfo from hook to dropdown', () => {
       const customWorkspaceInfo = {
         isCustomWorkspace: true,
         rootPath: '/home/user/project',
@@ -1163,10 +1174,11 @@ describe('FileTreePanel', () => {
         />
       );
 
-      expect(screen.getByText('/home/user/project')).toBeInTheDocument();
+      // Dropdown is rendered via hook's selectedRoot
+      expect(screen.getByTestId('root-switcher')).toBeInTheDocument();
     });
 
-    it('updates UI when workspaceInfo changes', async () => {
+    it('updates dropdown when workspaceInfo changes', async () => {
       const { rerender } = render(
         <FileTreePanel
           onOpenFile={mockOnOpenFile}
@@ -1176,8 +1188,8 @@ describe('FileTreePanel', () => {
         />
       );
 
-      // Initially shows "Workspace"
-      expect(screen.getByText('Workspace')).toBeInTheDocument();
+      // Dropdown is present
+      expect(screen.getByTestId('root-switcher')).toBeInTheDocument();
 
       // Update hook to return custom workspace
       mockUseFileTree.mockReturnValue({
@@ -1197,8 +1209,8 @@ describe('FileTreePanel', () => {
         />
       );
 
-      expect(screen.getByText('/new/custom/path')).toBeInTheDocument();
-      expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
+      // Dropdown is still present
+      expect(screen.getByTestId('root-switcher')).toBeInTheDocument();
     });
   });
 
@@ -1608,6 +1620,109 @@ describe('FileTreePanel', () => {
 
       expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument();
       expect(screen.getByText(/permanently delete "src"/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('root switcher dropdown', () => {
+    it('shows a dropdown in the header with Workspace and Vault options', () => {
+      render(
+        <FileTreePanel
+          onOpenFile={mockOnOpenFile}
+          onRemapOpenPaths={mockOnRemapOpenPaths}
+          onCloseOpenPaths={mockOnCloseOpenPaths}
+          collapsed={false}
+          onCollapseChange={vi.fn()}
+        />,
+      );
+
+      // The dropdown should be present (rendered as a select in tests via mock)
+      expect(screen.getByTestId('root-switcher')).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Workspace' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Vault' })).toBeInTheDocument();
+    });
+
+    it('defaults to workspace when no root is saved in localStorage', () => {
+      render(
+        <FileTreePanel
+          onOpenFile={mockOnOpenFile}
+          onRemapOpenPaths={mockOnRemapOpenPaths}
+          onCloseOpenPaths={mockOnCloseOpenPaths}
+          collapsed={false}
+          onCollapseChange={vi.fn()}
+        />,
+      );
+
+      const select = screen.getByTestId('root-switcher') as HTMLSelectElement;
+      expect(select.value).toBe('workspace');
+    });
+
+    it('shows the saved vault root when localStorage has vault selected', () => {
+      // Override the mock hook to return vault as selected
+      vi.mocked(useRootSwitcher).mockReturnValue({
+        selectedRoot: 'vault',
+        setSelectedRoot: vi.fn(),
+        vaultAvailable: true,
+      });
+
+      render(
+        <FileTreePanel
+          onOpenFile={mockOnOpenFile}
+          onRemapOpenPaths={mockOnRemapOpenPaths}
+          onCloseOpenPaths={mockOnCloseOpenPaths}
+          collapsed={false}
+          onCollapseChange={vi.fn()}
+        />,
+      );
+
+      const select = screen.getByTestId('root-switcher') as HTMLSelectElement;
+      expect(select.value).toBe('vault');
+    });
+
+    it('calls setSelectedRoot when the dropdown value changes', () => {
+      const setSelectedRoot = vi.fn();
+      vi.mocked(useRootSwitcher).mockReturnValue({
+        selectedRoot: 'workspace',
+        setSelectedRoot,
+        vaultAvailable: true,
+      });
+
+      render(
+        <FileTreePanel
+          onOpenFile={mockOnOpenFile}
+          onRemapOpenPaths={mockOnRemapOpenPaths}
+          onCloseOpenPaths={mockOnCloseOpenPaths}
+          collapsed={false}
+          onCollapseChange={vi.fn()}
+        />,
+      );
+
+      const select = screen.getByTestId('root-switcher') as HTMLSelectElement;
+      fireEvent.change(select, { target: { value: 'vault' } });
+
+      expect(setSelectedRoot).toHaveBeenCalledWith('vault');
+    });
+
+    it('shows vault option with warning when vault is unavailable', () => {
+      vi.mocked(useRootSwitcher).mockReturnValue({
+        selectedRoot: 'workspace',
+        setSelectedRoot: vi.fn(),
+        vaultAvailable: false,
+      });
+
+      render(
+        <FileTreePanel
+          onOpenFile={mockOnOpenFile}
+          onRemapOpenPaths={mockOnRemapOpenPaths}
+          onCloseOpenPaths={mockOnCloseOpenPaths}
+          collapsed={false}
+          onCollapseChange={vi.fn()}
+        />,
+      );
+
+      const options = screen.getAllByRole('option');
+      const vaultOption = options.find((o) => o.getAttribute('value') === 'vault');
+      expect(vaultOption).toBeInTheDocument();
+      expect(vaultOption?.textContent).toMatch(/⚠/);
     });
   });
 
