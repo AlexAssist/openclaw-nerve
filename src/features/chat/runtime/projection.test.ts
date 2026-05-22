@@ -572,6 +572,30 @@ describe('chat runtime projection', () => {
       expect(projectItemCount(tool)).toBe(0);
       expect(projectItemCount(group)).toBe(0);
     });
+
+    it('keeps tool-run grouping intact across zero-projection items in the windowed branch', () => {
+      const turn = makeTurn('session-1', 'run-1', 0, 'finalized');
+      const timeline = makeTimeline('session-1', [turn], {
+        'user-1': userItem(turn, 'user-1', 'do stuff', 0),
+        'tool-1': toolItem(turn, 'tool-1', 'read', { path: '/tmp/a' }, 10, 'complete'),
+        'thinking-empty': thinkingItem(turn, 'thinking-empty', '', 11, 'complete'),
+        'tool-2': toolItem(turn, 'tool-2', 'exec', { command: 'pwd' }, 12, 'complete'),
+        'assistant-empty': assistantItem(turn, 'assistant-empty', '', 13, false),
+        'tool-3': toolItem(turn, 'tool-3', 'read', { path: '/tmp/b' }, 14, 'complete'),
+        'assistant-final': assistantItem(turn, 'assistant-final', 'done', 100, false),
+      });
+
+      const windowed = projectTimeline(timeline, { visibleCount: 50 });
+      const linear = projectTimeline(timeline);
+
+      expect(windowed.totalMessages).toBe(windowed.messages.length);
+      expect(windowed.totalMessages).toBe(linear.messages.length);
+      expect(windowed.messages.map((m) => m.role)).toEqual(linear.messages.map((m) => m.role));
+      expect(windowed.messages.map((m) => m.msgId)).toEqual(linear.messages.map((m) => m.msgId));
+      const toolGroups = windowed.messages.filter((m) => m.toolGroup);
+      expect(toolGroups).toHaveLength(1);
+      expect(toolGroups[0].toolGroup).toHaveLength(3);
+    });
   });
 });
 

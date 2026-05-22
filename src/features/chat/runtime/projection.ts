@@ -117,7 +117,10 @@ function projectMessages(
       for (; nextIndex >= 0; nextIndex--) {
         const candidate = orderedItems[nextIndex];
         if (candidate.kind === 'tool_group') continue;
-        if (candidate.kind !== 'tool_call') break;
+        if (candidate.kind !== 'tool_call') {
+          if (projectItemCount(candidate) === 0) continue;
+          break;
+        }
         toolItems.unshift(candidate);
       }
 
