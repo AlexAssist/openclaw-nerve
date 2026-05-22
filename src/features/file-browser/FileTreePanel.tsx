@@ -128,6 +128,16 @@ export function FileTreePanel({
   // Call both hooks unconditionally (Rules of Hooks), pick based on selectedRoot at render time.
   const workspaceTree = useFileTree(workspaceAgentId, showHiddenWorkspaceEntries);
   const vaultTree = useVaultTree(showHiddenWorkspaceEntries);
+
+  // Reset tree state when switching between workspace and vault modes
+  useEffect(() => {
+    if (selectedRoot === 'vault') {
+      void vaultTree.refresh();
+    } else {
+      void workspaceTree.refresh();
+    }
+  }, [selectedRoot]);
+
   const {
     entries, loading, error, expandedPaths, selectedPath,
     loadingPaths, workspaceInfo, toggleDirectory, selectFile, refresh, handleFileChange, revealPath,
