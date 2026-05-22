@@ -1,5 +1,5 @@
 import type { ChatMessage } from '@/types';
-import { splitToolCallMessage, userTextProjects } from '@/features/chat/operations';
+import { splitToolCallMessage, countUserChatMsgs } from '@/features/chat/operations';
 import type { ChatMsg, ToolGroupEntry } from '@/features/chat/types';
 import { extractTTSMarkers } from '@/features/tts/useTTS';
 import { describeToolUse, renderMarkdown, renderToolResults } from '@/utils/helpers';
@@ -133,8 +133,8 @@ function projectMessages(
     const messageCount = projectItemCount(item);
     totalMessages += messageCount;
     if (messageCount > 0 && visibleMessages.length < visibleCount) {
+      const remaining = visibleCount - visibleMessages.length;
       const projected = projectItem(item, options);
-      const remaining = Math.min(visibleCount - visibleMessages.length, projected.length);
       visibleMessages.unshift(...projected.slice(-remaining));
     }
     index--;
@@ -374,7 +374,8 @@ export function projectItemCount(item: TimelineItem): number {
     case 'thinking':
       return item.text.trim() ? 1 : 0;
     case 'user_message': {
-      if (userTextProjects(item.text)) return 1;
+      const textCount = countUserChatMsgs(item.text);
+      if (textCount > 0) return textCount;
       if (item.images?.length || item.uploadAttachments?.length) return 1;
       return 0;
     }

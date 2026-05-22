@@ -228,19 +228,30 @@ const TTS_SYSTEM_HINT_RE = /\s*\[system: User sent a voice message\.[\s\S]*$/;
  */
 const WEBCHAT_ENVELOPE_RE = /Conversation info \(untrusted metadata\):[\s\S]*?"sender":\s*"[^"]*"\s*\}\s*\n?(?:```\s*\n?)?(?:\n?\[[\w, ]+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]]*\]\s*)?/g;
 
+const WEBCHAT_ENVELOPE_PREFIX = 'Conversation info (untrusted metadata):';
+
 /**
- * Returns true if a user message body would survive all gateway/voice/envelope
- * stripping done by {@link splitToolCallMessage} as a non-empty bubble. Mirrors
- * the in-function strip pipeline so callers can predict projection output
- * without running the full split. Used by the chat-runtime windowed projection
- * to keep totalMessages in sync with rendered ChatMsgs.
+ * Returns the number of user-bubble ChatMsgs that {@link splitToolCallMessage}
+ * would emit for a user message body. Mirrors the in-function strip pipeline
+ * plus the system-event splitting behavior so chat-runtime's windowed
+ * projection can keep totalMessages in sync with rendered ChatMsgs without
+ * running the full split for every off-window item.
+ *
+ * Returns 0 when the body collapses to empty after TTS hint, webchat envelope,
+ * and [voice] prefix stripping. Returns 1 in the common non-empty case.
+ * Returns the segment count when the body contains a SYSTEM_EVENT_LINE that
+ * splitToolCallMessage will fan out into separate bubbles, in which case the
+ * full splitter is invoked so the count reflects the actual segment shape.
  */
-export function userTextProjects(text: string): boolean {
-  const stripped = text
-    .replace(TTS_SYSTEM_HINT_RE, '')
-    .replace(WEBCHAT_ENVELOPE_RE, '')
-    .replace(/^\[voice\]\s*/, '');
-  return stripped.trim().length > 0;
+export function countUserChatMsgs(text: string): number {
+  let stripped = text.replace(TTS_SYSTEM_HINT_RE, '');
+  if (stripped.includes(WEBCHAT_ENVELOPE_PREFIX)) {
+    stripped = stripped.replace(WEBCHAT_ENVELOPE_RE, '');
+  }
+  stripped = stripped.replace(/^\[voice\]\s*/, '');
+  if (!stripped.trim()) return 0;
+  if (!SYSTEM_EVENT_LINE.test(stripped)) return 1;
+  return splitToolCallMessage({ role: 'user', content: text }).length;
 }
 
 /** Strip ANSI escape sequences (e.g. \x1b[33m) from terminal output. */
