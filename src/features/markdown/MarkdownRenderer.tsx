@@ -13,15 +13,14 @@ import { renderInlinePathReferences } from './inlineReferences';
 
 // KaTeX options (D4): trust=false blocks \href and other vector commands;
 // strict='ignore' silences warnings on assistant-emitted unknown commands;
-// errorColor='currentColor' lets the surrounding theme cascade win over KaTeX's
-// inline error color (KaTeX writes the value as an inline style attribute, which
-// would otherwise defeat the .katex-error CSS rule); maxSize and maxExpand bound
-// rendered-element size and macro expansion so untrusted LaTeX cannot DoS the UI.
+// maxSize/maxExpand bound rendered-element size and macro expansion so untrusted
+// LaTeX cannot DoS the UI. We let KaTeX write its default inline errorColor
+// (#cc0000) on .katex-error spans; src/index.css overrides with !important so
+// the themed destructive token wins the cascade against KaTeX's inline style.
 // (rehype-katex hardcodes throwOnError internally, so we do not pass it.)
 const REHYPE_KATEX_OPTIONS = {
   strict: 'ignore' as const,
   trust: false,
-  errorColor: 'currentColor',
   maxSize: 100,
   maxExpand: 1000,
 };
@@ -232,10 +231,19 @@ function processChildren(
       });
     }
 
-    if (React.isValidElement<{ children?: React.ReactNode; node?: { tagName?: string } }>(child)) {
+    if (React.isValidElement<{ children?: React.ReactNode; node?: { tagName?: string }; className?: string }>(child)) {
       const tagName = typeof child.type === 'string' ? child.type : '';
       const markdownTagName = child.props.node?.tagName ?? '';
       if (tagName === 'code' || tagName === 'pre' || tagName === 'a' || markdownTagName === 'code' || markdownTagName === 'pre' || markdownTagName === 'a') {
+        return child;
+      }
+
+      // Skip KaTeX subtrees: their inner spans are pure presentation (math
+      // glyphs) and walking them for path-linkification / search-highlighting
+      // is both pointless and a real cost on every render of a message that
+      // contains equations.
+      const className = child.props.className ?? '';
+      if (typeof className === 'string' && (className.includes('katex') || className === 'math')) {
         return child;
       }
 
