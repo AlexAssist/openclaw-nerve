@@ -912,12 +912,19 @@ describe('MarkdownRenderer', () => {
       expect(document.querySelector('.katex')).toBeNull();
     });
 
-    it('does not parse fenced ```math code blocks as equations', () => {
+    it('does not parse fenced ```math code blocks as equations (treats them as LaTeX code)', () => {
       render(<MarkdownRenderer content={'```math\n\\frac{1}{2}\n```'} />);
-      const pre = document.querySelector('pre');
-      expect(pre).toBeTruthy();
-      expect(pre?.textContent).toContain('\\frac{1}{2}');
+      // Verify the block is typeset as code, NOT as a KaTeX equation.
       expect(document.querySelector('.katex')).toBeNull();
+      // Verify it routed through the CodeBlock component (which wraps the
+      // <pre> in .code-block-wrapper and adds a .code-lang label) rather
+      // than falling to the inline-code path that would lose the block UI.
+      const wrapper = document.querySelector('.code-block-wrapper');
+      expect(wrapper).toBeTruthy();
+      const langLabel = wrapper?.querySelector('.code-lang');
+      expect(langLabel?.textContent).toBe('latex');
+      const pre = wrapper?.querySelector('pre');
+      expect(pre?.textContent).toContain('\\frac{1}{2}');
     });
 
     it('does not parse dollar signs inside inline code as math', () => {

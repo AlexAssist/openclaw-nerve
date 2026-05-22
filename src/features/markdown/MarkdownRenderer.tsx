@@ -30,11 +30,13 @@ const REHYPE_KATEX_OPTIONS = {
 // That picks up both legit math (remark-math emits these classes alongside
 // math-inline/math-display on its own <code> nodes) AND fenced ```math code
 // blocks (markdown emits only language-math). We want the former typeset and
-// the latter preserved as a code block (R3). The heuristic: strip language-math
-// only when math-inline/math-display are not also present, so rehype-katex
-// continues to see remark-math's output and skips standalone ```math fences.
+// the latter preserved as a code block (R3). The heuristic: when a <code> has
+// language-math but NOT math-inline/math-display, rename language-math to
+// language-latex (LaTeX is a real hljs language, and math source IS LaTeX-shaped)
+// so rehype-katex does not match the node and the downstream code component still
+// routes through CodeBlock with proper highlighting.
 type HastNode = { type?: string; tagName?: string; properties?: { className?: unknown }; children?: HastNode[] };
-function rehypeStripCodeOnlyMathClass() {
+function rehypeRenameFencedMathToLatex() {
   const walk = (node: HastNode | undefined) => {
     if (!node) return;
     if (node.type === 'element' && node.tagName === 'code' && node.properties) {
@@ -42,7 +44,7 @@ function rehypeStripCodeOnlyMathClass() {
       const list = Array.isArray(raw) ? (raw as string[]) : raw ? [raw as string] : [];
       const isRemarkMath = list.includes('math-inline') || list.includes('math-display');
       if (!isRemarkMath && list.includes('language-math')) {
-        node.properties.className = list.filter((cls) => cls !== 'language-math');
+        node.properties.className = list.map((cls) => (cls === 'language-math' ? 'language-latex' : cls));
       }
     }
     node.children?.forEach(walk);
@@ -52,7 +54,7 @@ function rehypeStripCodeOnlyMathClass() {
 
 const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath, remarkStableHeadingIds];
 const REHYPE_PLUGINS: PluggableList = [
-  rehypeStripCodeOnlyMathClass,
+  rehypeRenameFencedMathToLatex,
   [rehypeKatex, REHYPE_KATEX_OPTIONS],
 ];
 
