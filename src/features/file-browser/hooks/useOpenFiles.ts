@@ -91,12 +91,13 @@ function buildVaultWriteUrl(filePath: string): string {
   return `/api/vault/write?${params.toString()}`;
 }
 
-function isVaultPath(filePath: string, vaultRoot: string | null): boolean {
-  // Vault tree entries use paths relative to vaultRoot (no leading /).
-  // Workspace entries use absolute paths (start with /).
-  // When vaultRoot is set, non-leading-slash paths are vault paths.
-  if (!vaultRoot) return false;
-  return !filePath.startsWith('/');
+function isVaultPath(_filePath: string, _vaultRoot: string | null, selectedRoot: 'workspace' | 'vault'): boolean {
+  // When selectedRoot is 'vault', all files in the tree are vault files.
+  if (selectedRoot === 'vault') return true;
+  // When selectedRoot is 'workspace', all files are workspace files.
+  // Both vault and workspace trees use relative paths — vaultRoot is only
+  // needed for URL construction, not for path-shape distinction.
+  return false;
 }
 
 function getAgentScopedPathKey(agentId: string, filePath: string): string {
@@ -192,9 +193,10 @@ function collectDirtyFileTargets(
   }));
 }
 
-export function useOpenFiles(agentId = DEFAULT_AGENT_ID, opts?: { vaultRoot?: string | null }) {
+export function useOpenFiles(agentId = DEFAULT_AGENT_ID, opts?: { vaultRoot?: string | null; selectedRoot?: 'workspace' | 'vault' }) {
   const scopedAgentId = normalizeAgentId(agentId);
   const vaultRoot = opts?.vaultRoot ?? null;
+  const selectedRoot = opts?.selectedRoot ?? 'workspace';
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeTab, setActiveTabState] = useState<string>(() => loadPersistedTab(scopedAgentId));
   const [stateOwnerAgentId, setStateOwnerAgentId] = useState(scopedAgentId);
@@ -563,10 +565,12 @@ export function useOpenFiles(agentId = DEFAULT_AGENT_ID, opts?: { vaultRoot?: st
     }
 
     try {
-      const readUrl = isVaultPath(filePath, vaultRoot)
+      const readUrl = isVaultPath(filePath, vaultRoot, selectedRoot)
         ? buildVaultReadUrl(filePath)
         : buildReadUrl(filePath, requestAgentId);
+      console.log('[vault-debug] openFile URL:', readUrl, 'selectedRoot:', selectedRoot, 'vaultRoot:', vaultRoot);
       const res = await fetch(readUrl);
+      console.log('[vault-debug] response status:', res.status, 'ok:', res.ok);
       const data = await res.json();
 
       if (agentIdRef.current !== requestAgentId || !isLatestReadRequest(scopedPathKey, token)) {
@@ -644,7 +648,7 @@ export function useOpenFiles(agentId = DEFAULT_AGENT_ID, opts?: { vaultRoot?: st
     try {
       savingPaths.current.add(scopedPathKey);
 
-      const writeUrl = isVaultPath(filePath, vaultRoot)
+      const writeUrl = isVaultPath(filePath, vaultRoot, selectedRoot)
         ? buildVaultWriteUrl(filePath)
         : '/api/files/write';
       const res = await fetch(writeUrl, {
@@ -654,7 +658,7 @@ export function useOpenFiles(agentId = DEFAULT_AGENT_ID, opts?: { vaultRoot?: st
           path: filePath,
           content: file.content,
           expectedMtime: file.mtime,
-          ...(!isVaultPath(filePath, vaultRoot) && { agentId: requestAgentId }),
+          ...(!isVaultPath(filePath, vaultRoot, selectedRoot) && { agentId: requestAgentId }),
         }),
       });
       const data = await res.json();
@@ -711,7 +715,7 @@ export function useOpenFiles(agentId = DEFAULT_AGENT_ID, opts?: { vaultRoot?: st
     const { scopedPathKey, token } = nextReadRequestToken(requestAgentId, filePath);
 
     try {
-      const readUrl = isVaultPath(filePath, vaultRoot)
+      const readUrl = isVaultPath(filePath, vaultRoot, selectedRoot)
         ? buildVaultReadUrl(filePath)
         : buildReadUrl(filePath, requestAgentId);
       const res = await fetch(readUrl);

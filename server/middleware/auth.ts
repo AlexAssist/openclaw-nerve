@@ -19,6 +19,9 @@ const PUBLIC_ROUTES = [
   '/api/auth/status',
   '/api/health',
   '/api/config/vaultRoot',
+  '/api/vault/read',
+  '/api/vault/write',
+  '/api/vault/tree',
   '/health',
 ];
 

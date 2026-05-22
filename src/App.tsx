@@ -247,7 +247,7 @@ export default function App({ onLogout }: AppProps) {
     openFile, closeFile, updateContent, saveFile, reloadFile,
     handleFileChanged, remapOpenPaths, closeOpenPathsByPrefix,
     hasDirtyFiles, saveAllDirtyFiles, discardAllDirtyFiles,
-  } = useOpenFiles(workspaceAgentId, { vaultRoot });
+  } = useOpenFiles(workspaceAgentId, { vaultRoot, selectedRoot });
 
   // Save with workspace-scoped conflict toast
   const [saveToast, setSaveToast] = useState<{
